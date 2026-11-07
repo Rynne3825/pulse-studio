@@ -4,7 +4,6 @@ Extracts temporal, structural, linguistic, and sentiment features.
 """
 
 from datetime import datetime, timezone, timedelta
-import re
 from typing import Dict, Any
 from .text_cleaner import clean_text, extract_hashtags, extract_punctuation_counts
 

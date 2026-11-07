@@ -1,7 +1,7 @@
 """
 Bộ kiểm thử tự động Milestone M1: Trend Radar & High-Res Scraper.
 Kiểm thử chi tiết các ca biên (edge cases) và xác nhận Contract 1.
-Chạy bằng: D:\social-media-engagement\.venv\Scripts\python.exe -m unittest tests/test_m1_trend_radar.py
+Chạy bằng: D:\pulse-studio\.venv\Scripts\python.exe -m unittest tests/test_m1_trend_radar.py
 """
 
 import sys

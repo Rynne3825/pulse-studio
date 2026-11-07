@@ -8,7 +8,7 @@ Thay thế toàn bộ mô hình 24h cũ bằng 4 chỉ số vàng minh bạch:
 """
 
 import re
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity

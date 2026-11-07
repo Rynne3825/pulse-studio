@@ -10,7 +10,7 @@ import html
 import logging
 import requests
 import feedparser
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 try:
     from typing import TypedDict
 except ImportError:

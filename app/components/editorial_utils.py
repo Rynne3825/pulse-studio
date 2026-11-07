@@ -4,7 +4,6 @@ Chứa các hàm tiện ích kiểm tra an toàn URL và xử lý render HTML ch
 """
 
 import re
-import html
 from urllib.parse import urlsplit
 import streamlit as st
 

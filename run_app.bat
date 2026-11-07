@@ -1,7 +1,6 @@
 @echo off
-title He Thong Toi Uu Bai Dang Mang Xa Hoi
+title The Pulse Editorial Studio
 cd /d "%~dp0"
-set PYTHONPYCACHEPREFIX=%~dp0.cache\pycache
-echo Dang khoi chay Streamlit Dashboard...
+echo Dang khoi chay The Pulse Editorial Studio...
 ".venv\Scripts\streamlit.exe" run app\app.py
 pause

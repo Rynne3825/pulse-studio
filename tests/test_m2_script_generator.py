@@ -3,8 +3,8 @@ Bộ kiểm thử tự động Milestone M2: Dual-Engine Script Generator & Self
 Xác minh toàn diện cơ chế Mocking mạng, xử lý dị dạng phản hồi LLM, và tuân thủ Contract 2.
 
 Lệnh thực thi:
-    D:\\social-media-engagement\\.venv\\Scripts\\python.exe tests/test_m2_script_generator.py
-    D:\\social-media-engagement\\.venv\\Scripts\\python.exe -m unittest tests.test_m2_script_generator
+    D:\\pulse-studio\\.venv\\Scripts\\python.exe tests/test_m2_script_generator.py
+    D:\\pulse-studio\\.venv\\Scripts\\python.exe -m unittest tests.test_m2_script_generator
 """
 
 import os

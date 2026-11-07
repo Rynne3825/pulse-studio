@@ -55,7 +55,7 @@ flowchart TD
 ## 📁 2. Cấu Trúc Mã Nguồn (Modular Clean Architecture)
 
 ```text
-D:\social-media-engagement\
+D:\pulse-studio\
 ├── data/
 │   ├── raw/                      # Dữ liệu thu thập gốc
 │   ├── processed/                # Dữ liệu đặc trưng đã làm sạch
@@ -122,11 +122,11 @@ Thay thế toàn bộ mô hình xác suất giờ đăng 24h cũ bằng 4 tiêu 
 
 ### Bước 1: Khởi Tạo Môi Trường
 ```powershell
-cd D:\social-media-engagement
+cd D:\pulse-studio
 .venv\Scripts\activate
 ```
 
-### Bước 2: Cấu Hình Biến Môi Trường ([.env](file:///D:/social-media-engagement/.env))
+### Bước 2: Cấu Hình Biến Môi Trường ([.env](file:///D:/pulse-studio/.env))
 ```env
 ROUTER_BASE_URL=http://127.0.0.1:8045/v1
 ROUTER_API_KEY=your_gemini_api_key
