@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+.cache/
+
+# Environments & secrets
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Agent execution traces
+.agents/
+
+# Generated Media (MP4)
+data/output_videos/*.mp4
+!data/output_videos/.gitkeep
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# OS generated files
+.DS_Store
+Thumbs.db

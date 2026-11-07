@@ -1,0 +1,18 @@
+{
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.pytest_cache": true,
+    "**/__init__.py": true,
+    ".cache": true,
+    "**/.DS_Store": true
+  },
+  "terminal.integrated.env.windows": {
+    "PYTHONPYCACHEPREFIX": "${workspaceFolder}/.cache/pycache"
+  },
+  "python.envFile": "${workspaceFolder}/.env",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}",
+    "${workspaceFolder}/src"
+  ]
+}

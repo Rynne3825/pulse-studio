@@ -1,0 +1,11 @@
+{
+  "methodology": "Strict Leak-Free Train-Test Pipeline",
+  "accuracy": 0.801,
+  "f1_macro": 0.8,
+  "f1_weighted": 0.8,
+  "cv_accuracy_mean": 0.739,
+  "cv_accuracy_std": 0.0148,
+  "train_samples": 1567,
+  "test_samples": 392,
+  "feature_count": 62
+}
