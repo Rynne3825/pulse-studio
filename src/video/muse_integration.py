@@ -243,115 +243,57 @@ class SafeFallbackSynthesizer:
     def __init__(self) -> None:
         self.ffmpeg_bin = find_ffmpeg_binary()
 
-    def _generate_background_image(
+    def _download_image(self, url: Optional[str], temp_dir: Path) -> Optional[Path]:
+        """Tải ảnh nguồn với timeout bảo vệ."""
+        if not url or not url.strip():
+            return None
+        try:
+            r = requests.get(url.strip(), timeout=5)
+            if r.status_code == 200 and len(r.content) > 500:
+                p = temp_dir / "downloaded_raw.jpg"
+                p.write_bytes(r.content)
+                return p
+        except Exception:
+            pass
+        return None
+
+    def _generate_card(
         self,
-        ref_image_url: Optional[str],
-        temp_dir: Path,
-        title: str = "TIN TỨC XU HƯỚNG TIKTOK"
-    ) -> Path:
-        """Chuẩn bị ảnh nền dọc 9:16 (720x1280) cho chế độ đơn phân cảnh."""
-        bg_path = temp_dir / "background_9_16.png"
-
-        if ref_image_url and ref_image_url.strip():
-            try:
-                resp = requests.get(ref_image_url.strip(), timeout=6)
-                if resp.status_code == 200:
-                    src_img_path = temp_dir / "downloaded_raw.jpg"
-                    with open(src_img_path, "wb") as f:
-                        f.write(resp.content)
-
-                    with Image.open(src_img_path) as img:
-                        img = img.convert("RGB")
-                        canvas = Image.new("RGB", (720, 1280), (15, 23, 42))
-                        scale = 720.0 / img.width
-                        new_h = int(img.height * scale)
-                        resized_img = img.resize((720, new_h), Image.Resampling.LANCZOS)
-                        offset_y = max(0, (1280 - new_h) // 2)
-                        canvas.paste(resized_img, (0, offset_y))
-                        canvas.save(bg_path, "PNG")
-                        return bg_path
-            except Exception as e:
-                logger.warning(f"Không tải được ảnh gốc từ {ref_image_url}: {e}. Chuyển sang vẽ Card đồ họa.")
-
-        img = Image.new("RGB", (720, 1280), (15, 23, 42))
-        draw = ImageDraw.Draw(img)
-
-        draw.rectangle([(60, 80), (660, 160)], fill=(30, 41, 59), outline=(245, 158, 11), width=3)
-        draw.text((80, 105), "THE PULSE EDITORIAL — TIKTOK RADAR", fill=(245, 158, 11))
-
-        draw.rounded_rectangle([(60, 220), (660, 1000)], radius=24, fill=(24, 24, 37), outline=(51, 65, 85), width=2)
-        draw.text((100, 280), "[TIÊU ĐIỂM BÓC MẼ]", fill=(239, 68, 68))
-        clean_title = re.sub(r"\s+", " ", title)[:80]
-        words = clean_title.split()
-        lines = []
-        cur_line = []
-        for w in words:
-            cur_line.append(w)
-            if len(" ".join(cur_line)) > 24:
-                lines.append(" ".join(cur_line))
-                cur_line = []
-        if cur_line:
-            lines.append(" ".join(cur_line))
-
-        y_text = 360
-        for line in lines[:4]:
-            draw.text((100, y_text), line, fill=(255, 255, 255))
-            y_text += 50
-
-        draw.text((100, 920), "#ThePulseEditorial  #TikTokTrending", fill=(148, 163, 184))
-        img.save(bg_path, "PNG")
-        return bg_path
-
-    def _generate_scene_card(
-        self,
-        scene_num: int,
         title: str,
         headline: str,
         color: Tuple[int, int, int],
         ref_image_path: Optional[Path],
-        temp_dir: Path
+        temp_dir: Path,
+        scene_num: int = 1
     ) -> Path:
-        """Tạo Card hình ảnh 720x1280 chuẩn studio cho từng phân cảnh trong Storyboard."""
-        out_p = temp_dir / f"scene_card_{scene_num}.png"
+        """Tạo card đồ họa 720x1280 9:16 đồng nhất cho cả đơn cảnh và đa cảnh."""
+        out_p = temp_dir / f"card_{scene_num}.png"
         img = Image.new("RGB", (720, 1280), (15, 23, 42))
         draw = ImageDraw.Draw(img)
 
-        # Nếu có ảnh nguồn thực tế từ bài báo
         if ref_image_path and ref_image_path.exists():
             try:
                 with Image.open(ref_image_path) as ref_img:
-                    ref_rgb = ref_img.convert("RGB")
-                    # Tạo backdrop mờ ảo
-                    bg_blur = ref_rgb.resize((720, 1280), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(radius=20))
+                    rgb = ref_img.convert("RGB")
+                    bg_blur = rgb.resize((720, 1280), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(radius=20))
                     img.paste(bg_blur, (0, 0))
-                    # Lớp phủ làm tối
                     overlay = Image.new("RGBA", (720, 1280), (15, 23, 42, 175))
                     img.paste(overlay, (0, 0), overlay)
 
-                    # Đặt ảnh nét ở trung tâm
-                    scale = min(620.0 / ref_rgb.width, 500.0 / ref_rgb.height)
-                    nw = int(ref_rgb.width * scale)
-                    nh = int(ref_rgb.height * scale)
-                    fg = ref_rgb.resize((nw, nh), Image.Resampling.LANCZOS)
-                    ox = (720 - nw) // 2
-                    oy = 220 + (500 - nh) // 2
-                    img.paste(fg, (ox, oy))
-            except Exception as e:
-                logger.warning(f"Lỗi ghép ảnh nguồn cho scene {scene_num}: {e}")
+                    scale = min(620.0 / rgb.width, 500.0 / rgb.height)
+                    nw, nh = int(rgb.width * scale), int(rgb.height * scale)
+                    img.paste(rgb.resize((nw, nh), Image.Resampling.LANCZOS), ((720 - nw) // 2, 220 + (500 - nh) // 2))
+            except Exception:
+                pass
 
-        # Header Badge
         draw.rectangle([(50, 70), (670, 140)], fill=(30, 41, 59), outline=color, width=3)
-        draw.text((70, 95), f"THE PULSE STUDIO — {title.upper()}", fill=color)
+        draw.text((70, 95), f"THE PULSE STUDIO — {title.upper()[:35]}", fill=color)
 
-        # Khung viền thông tin phân cảnh
         draw.rounded_rectangle([(50, 760), (670, 1080)], radius=20, fill=(24, 24, 37), outline=(51, 65, 85), width=2)
-        draw.text((80, 790), f"[{title.upper()}]", fill=color)
+        draw.text((80, 790), f"[{title.upper()[:30]}]", fill=color)
 
-        # Căn dòng headline
-        clean_headline = re.sub(r"\s+", " ", headline).strip()
-        words = clean_headline.split()
-        lines = []
-        cur: List[str] = []
+        clean = re.sub(r"\s+", " ", headline).strip()
+        words, lines, cur = clean.split(), [], []
         for w in words:
             cur.append(w)
             if len(" ".join(cur)) > 26:
@@ -365,10 +307,32 @@ class SafeFallbackSynthesizer:
             draw.text((80, y_t), l, fill=(255, 255, 255))
             y_t += 45
 
-        # Footer Accent
         draw.text((80, 1140), "#ThePulse #TikTokTrending #Investigative", fill=(148, 163, 184))
         img.save(out_p, "PNG")
         return out_p
+
+    def _generate_background_image(
+        self,
+        ref_image_url: Optional[str],
+        temp_dir: Path,
+        title: str = "TIN TỨC XU HƯỚNG TIKTOK"
+    ) -> Path:
+        """Chuẩn bị ảnh nền dọc 9:16 (720x1280) cho chế độ đơn phân cảnh."""
+        # ponytail: delegate to unified _generate_card to avoid code duplication
+        local_ref = self._download_image(ref_image_url, temp_dir)
+        return self._generate_card("TIN NÓNG MẠNG XÃ HỘI", title, (245, 158, 11), local_ref, temp_dir, 0)
+
+    def _generate_scene_card(
+        self,
+        scene_num: int,
+        title: str,
+        headline: str,
+        color: Tuple[int, int, int],
+        ref_image_path: Optional[Path],
+        temp_dir: Path
+    ) -> Path:
+        """Tạo Card hình ảnh 720x1280 chuẩn studio cho từng phân cảnh trong Storyboard."""
+        return self._generate_card(title, headline, color, ref_image_path, temp_dir, scene_num)
 
     def _generate_ass_subtitle(
         self,
@@ -377,42 +341,18 @@ class SafeFallbackSynthesizer:
         temp_dir: Path
     ) -> Path:
         """Tạo file phụ đề ASS chuẩn TikTok cho chế độ đơn phân cảnh."""
-        ass_path = temp_dir / "tiktok_captions.ass"
-
         hook = str(script_data.get("hook", "")).strip() or "SỰ THẬT CHẤN ĐỘNG CẦN BÓC MẼ!"
         body = str(script_data.get("body", "")).strip() or "Cụ thể vấn đề đang diễn biến phức tạp..."
         cta = str(script_data.get("cta", "")).strip() or "Bạn nghĩ sao về điều này? Hãy để lại ý kiến!"
-
         t_hook_end = min(3.0, total_duration * 0.3)
         t_body_end = max(t_hook_end + 1.0, total_duration - 2.5)
 
-        def fmt_time(sec: float) -> str:
-            m = int(sec // 60)
-            s = int(sec % 60)
-            cs = int((sec - int(sec)) * 100)
-            return f"0:{m:02d}:{s:02d}.{cs:02d}"
-
-        ass_content = f"""[Script Info]
-Title: TikTok Styled Subtitles
-ScriptType: v4.00+
-PlayResX: 720
-PlayResY: 1280
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: HookStyle,Arial,48,&H0000FFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,2,5,40,40,200,1
-Style: BodyStyle,Arial,40,&H00FFFFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,240,1
-Style: CTAStyle,Arial,42,&H0000E5FF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,2,2,40,40,240,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,{fmt_time(0.0)},{fmt_time(t_hook_end)},HookStyle,,0,0,0,,{{\\an5\\b1}}{hook.upper()}
-Dialogue: 0,{fmt_time(t_hook_end)},{fmt_time(t_body_end)},BodyStyle,,0,0,0,,{{\\an2}}{body}
-Dialogue: 0,{fmt_time(t_body_end)},{fmt_time(total_duration)},CTAStyle,,0,0,0,,{{\\an2\\b1}}{cta}
-"""
-        with open(ass_path, "w", encoding="utf-8") as f:
-            f.write(ass_content)
-        return ass_path
+        # ponytail: reuse _generate_multiscene_ass for DRY subtitle generation
+        return self._generate_multiscene_ass([
+            (0.0, t_hook_end, "HookStyle", r"{\an5\b1}" + hook.upper()),
+            (t_hook_end, t_body_end, "BodyStyle", r"{\an2}" + body),
+            (t_body_end, total_duration, "CTAStyle", r"{\an2\b1}" + cta)
+        ], temp_dir)
 
     def _generate_multiscene_ass(
         self,

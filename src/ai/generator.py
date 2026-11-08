@@ -572,49 +572,7 @@ def safe_script_fallback(title: str, summary: str, engine: str = "gemini") -> Di
         f"breaking news scene regarding {clean_title}, 4K photorealistic resolution."
     )
 
-    scenes = [
-        {
-            "scene_num": 1,
-            "title": "Scene 1 - Hook Giật Gân",
-            "duration_sec": 4,
-            "voice_text": hook,
-            "visual_prompt": f"Vertical 9:16 aspect ratio video, close-up dramatic cinematic lighting, investigative tension regarding {clean_title}, photorealistic 4K, slow dolly push-in",
-            "camera_motion": "slow dolly push-in"
-        },
-        {
-            "scene_num": 2,
-            "title": "Scene 2 - Bóc Tách Sự Thật",
-            "duration_sec": 6,
-            "voice_text": body[:120],
-            "visual_prompt": f"Vertical 9:16 aspect ratio video, medium documentary shot, revealing facts behind {clean_title}, cinematic shadows, 4K, slow pan left to right",
-            "camera_motion": "pan left to right"
-        },
-        {
-            "scene_num": 3,
-            "title": "Scene 3 - Bằng Chứng & Hệ Quả",
-            "duration_sec": 5,
-            "voice_text": body[120:] if len(body) > 120 else "Nhiều tình tiết bất thường tiếp tục được cơ quan chức năng làm sáng tỏ.",
-            "visual_prompt": f"Vertical 9:16 aspect ratio video, analytical evidence tension, sharp focus on documents, moody ambiance, 4K, slow tilt down",
-            "camera_motion": "slow tilt down"
-        },
-        {
-            "scene_num": 4,
-            "title": "Scene 4 - Kêu Gọi Tranh Luận",
-            "duration_sec": 5,
-            "voice_text": cta,
-            "visual_prompt": f"Vertical 9:16 aspect ratio video, dramatic conclusion focal hold, high impact lighting, 4K photorealistic, center focal hold",
-            "camera_motion": "center focal hold"
-        }
-    ]
-    locks = {
-        "style_lock": "Vertical 9:16 aspect ratio, dramatic cinematic lighting, investigative realism, moody atmosphere, photorealistic 4K, anamorphic color grade",
-        "char_lock": f"Central subject related to {clean_title}",
-        "set_lock": "Contextual realistic investigative environment with high fidelity textures",
-        "video_suffix": "Smooth motion, 25fps, high quality cinematic render, no watermark, no text distortion",
-        "negative_prompt": "distorted face, blurry, low resolution, multiple heads, deformed limbs, floating artifacts, static motionless"
-    }
-
-    return {
+    base: Dict[str, object] = {
         "hook": hook,
         "body": body,
         "cta": cta,
@@ -622,11 +580,11 @@ def safe_script_fallback(title: str, summary: str, engine: str = "gemini") -> Di
         "hashtags": hashtags,
         "full_script": full_script,
         "muse_visual_prompt": prompt,
-        "scenes": scenes,
-        "cinematography_locks": locks,
         "engine_used": f"{engine} (offline_fallback)",
         "model_name": "deterministic-fallback"
     }
+    # ponytail: reuse _apply_safe_defaults for 4-scene storyboard and locks
+    return _apply_safe_defaults(base, title, summary)
 
 
 # ==============================================================================
