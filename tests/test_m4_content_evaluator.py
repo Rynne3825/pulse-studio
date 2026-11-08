@@ -83,3 +83,27 @@ def test_evaluate_full_script():
     assert "trend_similarity_score" in report["breakdown"]
     assert "pacing_score" in report["breakdown"]
     assert "cta_score" in report["breakdown"]
+
+
+def test_evaluate_empty_script():
+    """Kiểm tra chấm điểm kịch bản rỗng không bao giờ gây lỗi TypeError (str + list)."""
+    report = evaluate_tiktok_script({}, "")
+    assert isinstance(report, dict)
+    assert report["overall_score"] >= 0.0
+    assert isinstance(report["actionable_checklist"], list)
+    assert len(report["actionable_checklist"]) > 0
+    assert report["metrics"]["word_count"] == 0
+    assert report["metrics"]["hook_keywords"] == []
+    assert report["metrics"]["cta_keywords"] == []
+
+
+def test_evaluate_partial_script():
+    """Kiểm tra chấm điểm kịch bản chỉ có 1 phần (chỉ hook hoặc chỉ body)."""
+    report_hook_only = evaluate_tiktok_script({"hook": "Sự thật bất ngờ bạn biết chưa?"}, "Tin tức")
+    assert isinstance(report_hook_only["actionable_checklist"], list)
+    assert report_hook_only["breakdown"]["hook_score"] > 0
+
+    report_cta_only = evaluate_tiktok_script({"cta": "Hãy bình luận ngay nhé!"}, "")
+    assert isinstance(report_cta_only["actionable_checklist"], list)
+    assert report_cta_only["breakdown"]["cta_score"] > 0
+

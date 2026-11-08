@@ -48,10 +48,15 @@ class TikTokViralEvaluator:
         """Đánh giá sức mạnh câu mở đầu 3 giây (Thang điểm 0 - 100)."""
         clean_hook = hook_text.strip().lower()
         if not clean_hook:
-            return {"score": 0.0, "feedback": "Thiếu câu mở đầu (Hook)."}
+            return {
+                "score": 0.0,
+                "matched_keywords": [],
+                "word_count": 0,
+                "feedback": ["Thiếu câu mở đầu (Hook)."]
+            }
 
         score = 50.0  # Điểm cơ sở
-        feedback_items = []
+        feedback_items: List[str] = []
 
         # 1. Kiểm tra dấu hỏi hoặc từ nghi vấn kích thích tò mò (+20 điểm)
         if "?" in clean_hook or "tại sao" in clean_hook or "liệu có" in clean_hook or "vì sao" in clean_hook:
@@ -89,7 +94,11 @@ class TikTokViralEvaluator:
     def calculate_trend_similarity(self, source_text: str, script_text: str) -> Dict[str, Any]:
         """Tính độ tương đồng ngữ nghĩa Cosine Similarity giữa bài báo gốc và kịch bản (0 - 100)."""
         if not source_text.strip() or not script_text.strip():
-            return {"score": 0.0, "cosine": 0.0, "feedback": ["Thiếu nội dung nguồn để so khớp."]}
+            return {
+                "score": 0.0,
+                "cosine_raw": 0.0,
+                "feedback": ["Thiếu nội dung nguồn để so khớp."]
+            }
 
         try:
             tfidf_matrix = self.vectorizer.fit_transform([source_text, script_text])
@@ -100,7 +109,7 @@ class TikTokViralEvaluator:
         # Cosine similarity thường nằm trong khoảng 0.15 - 0.7 cho tóm tắt
         # Scale về thang điểm 0 - 100
         score = min(100.0, cos_sim * 160.0)
-        feedback_items = []
+        feedback_items: List[str] = []
         if score >= 70:
             feedback_items.append("Bám sát tuyệt đối sự kiện và số liệu từ tin thời sự gốc.")
         elif score >= 50:
@@ -120,10 +129,18 @@ class TikTokViralEvaluator:
         words = clean_text.split()
         word_count = len(words)
 
+        if word_count == 0:
+            return {
+                "score": 0.0,
+                "word_count": 0,
+                "estimated_duration": 0.0,
+                "feedback": ["Chưa có nội dung kịch bản để tính nhịp điệu."]
+            }
+
         # Chuẩn TikTok: 60 - 110 từ (khoảng 20 - 40 giây nói với tốc độ trung bình 2.8 - 3 từ/giây)
         estimated_duration = round(word_count / 2.8, 1)
 
-        feedback_items = []
+        feedback_items: List[str] = []
         if 60 <= word_count <= 110:
             score = 100.0
             feedback_items.append(f"Thời lượng hoàn hảo ({word_count} từ ~ {estimated_duration}s), giữ trọn tỷ lệ xem hết (Completion Rate).")
@@ -151,10 +168,14 @@ class TikTokViralEvaluator:
         """Đánh giá lời kêu gọi hành động (CTA) kích thích bình luận và tương tác (0 - 100)."""
         clean_cta = cta_text.strip().lower()
         if not clean_cta:
-            return {"score": 20.0, "feedback": ["Thiếu câu kêu gọi hành động ở đoạn kết."]}
+            return {
+                "score": 20.0,
+                "matched_keywords": [],
+                "feedback": ["Thiếu câu kêu gọi hành động ở đoạn kết."]
+            }
 
         score = 40.0
-        feedback_items = []
+        feedback_items: List[str] = []
         matched_keywords = [kw for kw in VIRAL_CTA_KEYWORDS if kw in clean_cta]
 
         if matched_keywords:
@@ -217,12 +238,20 @@ class TikTokViralEvaluator:
             grade_title = "CẦN TỐI ƯU LẠI KỊCH BẢN"
             grade_color = "#EF4444"  # Đỏ
 
+        # Chuẩn hóa feedback an toàn thành List[str]
+        def _ensure_list(val: Any) -> List[str]:
+            if isinstance(val, list):
+                return [str(x) for x in val if str(x).strip()]
+            if isinstance(val, str) and val.strip():
+                return [val.strip()]
+            return []
+
         # Tổng hợp danh sách checklist hành động
         all_feedback = (
-            hook_res["feedback"]
-            + trend_res["feedback"]
-            + pacing_res["feedback"]
-            + cta_res["feedback"]
+            _ensure_list(hook_res.get("feedback"))
+            + _ensure_list(trend_res.get("feedback"))
+            + _ensure_list(pacing_res.get("feedback"))
+            + _ensure_list(cta_res.get("feedback"))
         )
 
         return {
@@ -231,16 +260,16 @@ class TikTokViralEvaluator:
             "grade_title": grade_title,
             "grade_color": grade_color,
             "breakdown": {
-                "hook_score": hook_res["score"],
-                "trend_similarity_score": trend_res["score"],
-                "pacing_score": pacing_res["score"],
-                "cta_score": cta_res["score"]
+                "hook_score": hook_res.get("score", 0.0),
+                "trend_similarity_score": trend_res.get("score", 0.0),
+                "pacing_score": pacing_res.get("score", 0.0),
+                "cta_score": cta_res.get("score", 0.0)
             },
             "metrics": {
-                "word_count": pacing_res["word_count"],
-                "estimated_duration_sec": pacing_res["estimated_duration"],
-                "hook_keywords": hook_res["matched_keywords"],
-                "cta_keywords": cta_res["matched_keywords"],
+                "word_count": pacing_res.get("word_count", 0),
+                "estimated_duration_sec": pacing_res.get("estimated_duration", 0.0),
+                "hook_keywords": hook_res.get("matched_keywords", []),
+                "cta_keywords": cta_res.get("matched_keywords", []),
                 "cosine_raw": trend_res.get("cosine_raw", 0.0)
             },
             "actionable_checklist": all_feedback
