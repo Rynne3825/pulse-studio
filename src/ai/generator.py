@@ -23,6 +23,14 @@ logger = logging.getLogger("ai.generator")
 _CACHED_ROUTER_BASE_URL: Optional[str] = None
 
 
+class ImagePromptDetail(TypedDict, total=False):
+    subject: str
+    lighting: str
+    camera_angle: str
+    color_tone: str
+    art_style: str
+
+
 class SceneItem(TypedDict, total=False):
     scene_num: int
     title: str
@@ -30,6 +38,7 @@ class SceneItem(TypedDict, total=False):
     voice_text: str
     visual_prompt: str
     camera_motion: str
+    image_prompt_detail: ImagePromptDetail
 
 
 class CinematographyLocks(TypedDict, total=False):
@@ -90,68 +99,115 @@ MUSE_MODEL = os.getenv("MUSE_CHAT_MODEL", "oc/muse-spark-1.3-contributor-free")
 # 2. PROMPT KỊCH BẢN TIKTOK 4 PHÂN CẢNH (REVIEW / BÓC MẼ) & INJECTION DEFENSE
 # ==============================================================================
 TIKTOK_SYSTEM_PROMPT = """Bạn là Giám đốc Sáng tạo & Chuyên gia Biên kịch TikTok triệu view, chuyên thể loại 'Review / Bóc Mẽ Sự Thật' (Investigative & Truth Breakdown).
-Nhiệm vụ: Chuyển thể tin tức được cung cấp thành kịch bản video TikTok 4 phân cảnh kịch tính, lôi cuốn, giữ chân người xem đến giây cuối cùng.
+Nhiệm vụ: Chuyển thể tin tức được cung cấp thành kịch bản video TikTok 4 phân cảnh kịch tính theo công thức VIRAL 3 PHẦN, lôi cuốn, giữ chân người xem đến giây cuối cùng.
 
-QUY TẮC CẤU TRÚC 4 PHÂN CẢNH BẮT BUỘC:
-1. Scene 1 - Hook (3-4 giây đầu):
-   - Độ dài: DƯỚI 15 TỪ (lý tưởng từ 9 đến 14 từ).
-   - Yêu cầu: Kết thúc bằng dấu hỏi '?' và bắt buộc chứa ít nhất 1 từ khóa gây tò mò/giật gân: 'sự thật', 'bóc mẽ', 'chấn động', 'cực sốc', 'lừa đảo', 'cảnh báo', 'bí mật', 'bất ngờ'.
-2. Scene 2 - Body (Bóc tách sự thật):
-   - Độ dài: Từ 60 đến 85 từ.
-   - Yêu cầu: Bóc tách bản chất, cơ chế thủ đoạn hoặc điểm mấu chốt của sự việc. BẮT BUỘC giữ lại các thực thể, tên riêng, số liệu hoặc từ khóa quan trọng từ tin tức gốc để giữ tính xác thực.
-3. Scene 3 - CTA (Kêu gọi tranh luận):
+QUY TẮC CẤU TRÚC 3 PHẦN VIRAL BẮT BUỘC:
+1. PHẦN 1 - HOOK (0-3s) - Scene 1 - Hook (Mở đầu scroll-stopping giữ chân):
+   - Thời lượng: 0-3 giây (duration_sec: 3).
+   - Độ dài: DƯỚI HOẶC BẰNG 15 TỪ (<= 15 từ, lý tưởng 9-14 từ).
+   - Yêu cầu: Bắt buộc kết thúc bằng dấu hỏi '?' và bắt buộc chứa ít nhất 1 từ khóa kích hoạt tò mò/giật gân: 'sự thật', 'bóc mẽ', 'chấn động', 'cực sốc', 'lừa đảo', 'cảnh báo', 'bí mật', 'bất ngờ'.
+2. PHẦN 2 - RETAIN (4-15s) - Thân kịch bản cuốn hút (Phát triển cao trào qua Scene 2 và Scene 3, tổng 60-85 từ):
+   - Scene 2 - Bóc Tách Sự Thật (4-9s, duration_sec: 6):
+     * Bóc tách bản chất, cơ chế thủ đoạn hoặc nghịch lý bất ngờ.
+     * BẮT BUỘC giữ lại tên riêng, số liệu, thực thể quan trọng từ tin tức gốc để giữ tính xác thực.
+   - Scene 3 - Bằng Chứng & Hệ Quả (10-15s, duration_sec: 5):
+     * Đưa ra bằng chứng điều tra, dữ liệu xác thực, tác động hoặc hệ quả thực tế đến cộng đồng.
+   - TỔNG SỐ TỪ CỦA CẢ SCENE 2 VÀ SCENE 3 (trường 'body'): Bắt buộc nằm trong khoảng từ 60 đến 85 từ.
+3. PHẦN 3 - PAYOFF & CTA (16-20+s) - Scene 4 - Payoff / CTA (Đọng lại giá trị & Kêu gọi hành động):
+   - Thời lượng: 16-20+ giây (duration_sec: 5).
    - Độ dài: Từ 15 đến 25 từ.
-   - Yêu cầu: Kết thúc bằng dấu hỏi '?' và chứa từ khóa kích thích tranh luận: 'bình luận', 'nghĩ sao', 'ý kiến', 'chia sẻ', 'thảo luận'.
-4. Scene 4 - Hashtags:
-   - Danh sách từ 4 đến 6 hashtag liên quan (#bocme, #review, #trending, #tiktoknews, và tag chủ đề).
+   - Yêu cầu: Đúc kết bài học đắt giá, kết thúc bằng dấu hỏi '?' và chứa từ khóa kích thích tranh luận: 'bình luận', 'nghĩ sao', 'ý kiến', 'chia sẻ', 'thảo luận'.
 
-YÊU CẦU CHO CINEMATOGRAPHY & MUSE AI:
-- Viết visual_prompt hoàn toàn bằng TIẾNG ANH (English).
-- Bắt buộc chỉ định khung hình dọc 9:16 phục vụ mô hình tạo video Muse AI.
-- Chứa cụm từ: 'Vertical 9:16 aspect ratio video, dramatic cinematic lighting, investigative realism, moody atmosphere, photorealistic 4K, cinematic slow dolly push-in'.
+HASHTAGS:
+- Danh sách từ 4 đến 6 hashtag liên quan (#bocme, #review, #trending, #tiktoknews, và tag chủ đề bài viết).
+
+YÊU CẦU CHO CINEMATOGRAPHY & HÌNH ẢNH 5 CHIỀU (5 DIMENSIONS):
+Mỗi phân cảnh trong mảng 'scenes' BẮT BUỘC có mô tả hình ảnh cinematic cực kỳ chi tiết bao gồm ĐẦY ĐỦ 5 CHIỀU bằng tiếng Anh:
+1) Subject & Action: Chủ thể hành động cụ thể, biểu cảm và tương tác rõ ràng.
+2) Lighting: Ánh sáng điện ảnh (dramatic cinematic lighting, volumetric rim light, neon moody glow, soft natural daylight, chiaroscuro...).
+3) Camera Angle & Shot Type: Góc máy và cỡ cảnh (extreme close-up macro, dramatic low angle, medium documentary shot, high angle over-the-shoulder...).
+4) Color Tone / Palette: Bảng màu và tông sắc (teal and orange grade, cool desaturated cyberpunk, warm golden hour, dark moody contrast...).
+5) Art Style & Quality: Phong cách nghệ thuật (hyperrealistic 4K, 8K photorealism, award-winning cinematic realism, Unreal Engine 5 render style...).
+
+- visual_prompt cho mỗi scene: BẮT BUỘC bắt đầu bằng chuỗi 'Vertical 9:16 aspect ratio video, ' kết hợp chi tiết cả 5 thông số trên thành một câu prompt cinematic hoàn chỉnh.
+- image_prompt_detail cho mỗi scene: Đối tượng JSON chứa 5 trường cụ thể:
+  * "subject": "..."
+  * "lighting": "..."
+  * "camera_angle": "..."
+  * "color_tone": "..."
+  * "art_style": "..."
+- muse_visual_prompt toàn cục: Chuỗi prompt tổng quan đại diện toàn video, bắt đầu bằng 'Vertical 9:16 aspect ratio video, dramatic cinematic lighting, investigative realism, moody atmosphere, photorealistic 4K, cinematic slow dolly push-in'.
 - Phân tách rõ 4 phân cảnh trong mảng 'scenes' kèm camera motion: 'slow dolly push-in', 'pan left to right', 'slow tilt down', 'center focal hold'.
 - Khóa chặt thuộc tính điện ảnh trong 'cinematography_locks' (style_lock, char_lock, set_lock, video_suffix, negative_prompt).
 
 QUY TẮC ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (DUY NHẤT 1 KHỐI JSON HỢP LỆ, KHÔNG CODE FENCE):
 {
   "hook": "Câu thoại mở đầu giật gân kết thúc bằng dấu hỏi?",
-  "body": "Nội dung bóc tách sự thật từ 60 đến 85 từ...",
-  "cta": "Câu kêu gọi tranh luận kết thúc bằng dấu hỏi?",
+  "body": "Nội dung bóc tách sự thật và bằng chứng từ 60 đến 85 từ...",
+  "cta": "Câu đúc kết và kêu gọi tranh luận từ 15 đến 25 từ kết thúc bằng dấu hỏi?",
   "hashtags": ["#bocme", "#review", "#trending", "#tiktoknews"],
   "full_script": "Toàn bộ kịch bản ghép từ Hook, Body, CTA và Hashtags",
   "muse_visual_prompt": "Vertical 9:16 aspect ratio video, dramatic cinematic lighting, investigative realism, moody atmosphere, photorealistic 4K, cinematic slow dolly push-in...",
   "scenes": [
     {
       "scene_num": 1,
-      "title": "Scene 1 - Hook Giật Gân",
-      "duration_sec": 4,
-      "voice_text": "Câu thoại mở đầu giật gân kết thúc bằng dấu hỏi?",
-      "visual_prompt": "Vertical 9:16 aspect ratio video, close-up dramatic cinematic lighting, investigative tension, photorealistic 4K",
-      "camera_motion": "slow dolly push-in"
+      "title": "Scene 1 - Hook",
+      "duration_sec": 3,
+      "voice_text": "Câu thoại mở đầu dưới 15 từ kết thúc bằng dấu hỏi?",
+      "visual_prompt": "Vertical 9:16 aspect ratio video, close-up shot of a smartphone displaying a fake bank alert with glowing red warning icons, dramatic cinematic lighting with high contrast shadows, intense low angle view, dark teal and ominous amber color tone, photorealistic 4K hyperrealistic cinema style",
+      "camera_motion": "slow dolly push-in",
+      "image_prompt_detail": {
+        "subject": "Smartphone displaying fake bank alert with glowing red warning icons",
+        "lighting": "Dramatic cinematic lighting with high contrast shadows and rim light",
+        "camera_angle": "Intense low angle close-up shot",
+        "color_tone": "Dark teal and ominous amber color palette",
+        "art_style": "Photorealistic 4K hyperrealistic cinema style"
+      }
     },
     {
       "scene_num": 2,
       "title": "Scene 2 - Bóc Tách Sự Thật",
       "duration_sec": 6,
-      "voice_text": "Chi tiết bóc tách diễn biến sự việc...",
-      "visual_prompt": "Vertical 9:16 aspect ratio video, medium documentary shot, revealing facts, realistic lighting, 4K",
-      "camera_motion": "pan left to right"
+      "voice_text": "Chi tiết bóc tách diễn biến sự việc phần một...",
+      "visual_prompt": "Vertical 9:16 aspect ratio video, medium documentary tracking shot of investigative documents and forensic charts, volumetric atmospheric lighting with hazy overhead beam, medium eye-level angle, cold desaturated steel blue and warm tungsten contrast, hyperrealistic investigative journalism aesthetic 4K",
+      "camera_motion": "pan left to right",
+      "image_prompt_detail": {
+        "subject": "Investigative documents and forensic evidence charts laid on table",
+        "lighting": "Volumetric atmospheric lighting with hazy overhead beam",
+        "camera_angle": "Medium documentary eye-level tracking shot",
+        "color_tone": "Cold desaturated steel blue and warm tungsten contrast",
+        "art_style": "Hyperrealistic investigative journalism aesthetic 4K"
+      }
     },
     {
       "scene_num": 3,
       "title": "Scene 3 - Bằng Chứng & Hệ Quả",
       "duration_sec": 5,
-      "voice_text": "Bằng chứng số liệu và hậu quả thực tế...",
-      "visual_prompt": "Vertical 9:16 aspect ratio video, analytical evidence tension, sharp focus, moody ambiance, 4K",
-      "camera_motion": "slow tilt down"
+      "voice_text": "Bằng chứng số liệu và hậu quả thực tế phần hai...",
+      "visual_prompt": "Vertical 9:16 aspect ratio video, high-angle view of official warning alerts and impacted community, harsh documentary spotlighting with dramatic side shadows, high-angle slow tilt down framing, gritty urban reportage charcoal gray and cautionary red alerts, award-winning photojournalism style 4K",
+      "camera_motion": "slow tilt down",
+      "image_prompt_detail": {
+        "subject": "Official warning alerts and data boards showing community impact",
+        "lighting": "Harsh documentary spotlighting with dramatic side shadows",
+        "camera_angle": "High-angle framing with slow tilt down perspective",
+        "color_tone": "Gritty urban reportage charcoal gray and cautionary red alerts",
+        "art_style": "Award-winning photojournalism style 4K with raw atmospheric depth"
+      }
     },
     {
       "scene_num": 4,
-      "title": "Scene 4 - Kêu Gọi Tranh Luận",
+      "title": "Scene 4 - Payoff / CTA",
       "duration_sec": 5,
-      "voice_text": "Câu kêu gọi tranh luận kết thúc bằng dấu hỏi?",
-      "visual_prompt": "Vertical 9:16 aspect ratio video, dramatic conclusion focal hold, high impact lighting, 4K",
-      "camera_motion": "center focal hold"
+      "voice_text": "Câu đúc kết và kêu gọi tranh luận kết thúc bằng dấu hỏi?",
+      "visual_prompt": "Vertical 9:16 aspect ratio video, direct-to-camera compelling visual takeaway with interactive comment prompts, high-impact three-point studio lighting with luminous rim separation, eye-level center focal portrait framing, vibrant modern editorial palette with clean highlights, premium commercial documentary finish 4K",
+      "camera_motion": "center focal hold",
+      "image_prompt_detail": {
+        "subject": "Direct-to-camera presenter view with interactive discussion comment prompts",
+        "lighting": "High-impact three-point studio lighting with luminous rim separation",
+        "camera_angle": "Eye-level center focal portrait framing",
+        "color_tone": "Vibrant modern editorial palette with clean balanced highlights",
+        "art_style": "Premium commercial documentary finish 4K ultra-clear resolution"
+      }
     }
   ],
   "cinematography_locks": {
@@ -282,97 +338,190 @@ def _clean_str_field(val: object) -> str:
     return text.strip()
 
 
+def _build_viral_hook(clean_title: str = "") -> str:
+    """Sinh câu Hook mở đầu (0-3s, <=15 từ, kết thúc bằng ?, chứa từ khóa giật gân/bóc mẽ)."""
+    title_words = clean_title.split() if clean_title else []
+    if title_words:
+        short_title = " ".join(title_words[:8])
+        return f"Sự thật chấn động: {short_title}?"
+    return "Cảnh báo sự thật chấn động đang gây sốt cộng đồng mạng?"
+
+
+def _build_viral_body(clean_title: str = "", clean_summary: str = "") -> str:
+    """Sinh thân kịch bản Retain (4-15s, 60-85 từ trải qua Scene 2 & 3)."""
+    clean_t = (clean_title or "").strip()
+    clean_s = (clean_summary or "").strip()
+    lead = f"Theo thông tin điều tra mới nhất về {clean_t or 'vụ việc'}, {clean_s or 'cơ quan chức năng đã làm rõ nhiều tình tiết bất ngờ'}."
+    expansion = (
+        "Thủ đoạn tinh vi được các đối tượng thực hiện bài bản nhằm đánh lừa sự chú ý của dư luận và chiếm đoạt lợi ích. "
+        "Các bằng chứng thực tế cùng tài liệu xác thực cho thấy hậu quả nghiêm trọng và mức độ ảnh hưởng diện rộng. "
+        "Cộng đồng mạng cần nâng cao tinh thần cảnh giác, kiểm tra kỹ lưỡng mọi nguồn tin để tránh rơi vào bẫy."
+    )
+    full_text = f"{lead} {expansion}"
+    words = full_text.split()
+    if len(words) < 65:
+        filler = "Đây là hồi chuông cảnh báo rõ ràng cho tất cả chúng ta trước những chiêu trò ngày càng liều lĩnh và nguy hiểm."
+        words.extend(filler.split())
+    if len(words) > 82:
+        words = words[:80]
+    return " ".join(words)
+
+
+def _build_viral_cta(clean_title: str = "") -> str:
+    """Sinh câu kết Payoff & CTA (16-20+s, 15-25 từ, kết thúc bằng ?, chứa từ khóa CTA)."""
+    return "Bạn nghĩ sao về vụ việc này? Hãy để lại ý kiến và chia sẻ góc nhìn dưới phần bình luận ngay nhé?"
+
+
+def _build_default_image_prompt_detail(scene_num: int, clean_title: str = "") -> ImagePromptDetail:
+    """Tạo thông số chi tiết 5 chiều cho prompt hình ảnh: Subject, Lighting, Camera Angle, Color Tone, Art Style."""
+    ctx = clean_title.strip() if clean_title else "investigative news report"
+    if scene_num == 1:
+        return {
+            "subject": f"High tension central subject reacting to {ctx}, smartphone displaying urgent alerts with glowing red warning icons",
+            "lighting": "Dramatic chiaroscuro lighting, high-contrast rim light cutting through dark background",
+            "camera_angle": "Intense low-angle extreme close-up shot focusing on subject expression and smartphone display",
+            "color_tone": "Moody cinematic palette, deep midnight teal with neon amber warning accents",
+            "art_style": "Photorealistic 4K cinematic realism, shallow depth of field, anamorphic lens bokeh, 8k render quality"
+        }
+    elif scene_num == 2:
+        return {
+            "subject": f"Investigative scene unveiling the hidden mechanism of {ctx}, forensic documents, financial charts, and digital evidence on display",
+            "lighting": "Volumetric atmospheric lighting, hazy overhead beam highlighting crucial physical evidence",
+            "camera_angle": "Medium documentary tracking shot with deliberate horizontal panning across key evidence",
+            "color_tone": "Cold desaturated steel blue with subtle warm tungsten table lamp contrast",
+            "art_style": "Hyperrealistic investigative journalism aesthetic, crisp 4K textures, tactile realism, cinematic motion blur"
+        }
+    elif scene_num == 3:
+        return {
+            "subject": f"Realistic fallout and widespread community impact of {ctx}, showing affected people, official warnings, and verified data boards",
+            "lighting": "Harsh documentary spotlighting, dramatic side shadows emphasizing emotional gravity",
+            "camera_angle": "High-angle slow tilt down shot capturing the broader scale of consequences",
+            "color_tone": "Gritty urban reportage grading, muted charcoal gray and cautionary red alerts",
+            "art_style": "Award-winning photojournalism style, 4K ultra-sharp focus, cinematic film grain, raw atmospheric depth"
+        }
+    else:
+        return {
+            "subject": f"Direct-to-camera compelling visual takeaway, open forum discussion symbol with interactive comment prompts regarding {ctx}",
+            "lighting": "High-impact three-point studio lighting, soft key light with glowing rim separation",
+            "camera_angle": "Eye-level center focal portrait framing, engaging direct viewer eye contact",
+            "color_tone": "Vibrant modern editorial palette, clean balanced contrast with luminous highlights",
+            "art_style": "Premium commercial documentary finish, ultra-clear 4K resolution, smooth frame pacing, professional color grading"
+        }
+
+
+def _format_visual_prompt_from_detail(detail: ImagePromptDetail) -> str:
+    """Định dạng visual prompt chuẩn 9:16 bắt đầu bằng chuỗi cố định và kết hợp 5 chiều."""
+    return (
+        f"Vertical 9:16 aspect ratio video, {detail.get('subject', '')}, {detail.get('lighting', '')}, "
+        f"{detail.get('camera_angle', '')}, {detail.get('color_tone', '')}, {detail.get('art_style', '')}"
+    )
+
+
 def _apply_safe_defaults(result: Dict[str, object], title: str = "", summary: str = "") -> Dict[str, object]:
-    """Điền giá trị mặc định an toàn cho các trường rỗng đảm bảo bất biến Contract 2."""
-    clean_title = title.strip()[:50] if title else ""
-    clean_summary = summary.strip()[:140] if summary else ""
+    """Điền giá trị mặc định an toàn cho các trường rỗng đảm bảo bất biến Contract 2 và cấu trúc viral 3 phần."""
+    clean_title = str(title or "").strip()[:60]
+    clean_summary = str(summary or "").strip()[:140]
 
     if not result.get("hook"):
-        if clean_title:
-            result["hook"] = f"Cảnh báo sự thật chấn động đằng sau vụ việc {clean_title}?"
-        else:
-            result["hook"] = "Cảnh báo sự thật chấn động đang gây sốt cộng đồng mạng?"
+        result["hook"] = _build_viral_hook(clean_title)
 
     if not result.get("body"):
-        if clean_summary:
-            result["body"] = (
-                f"Theo thông tin mới nhất, {clean_summary}. "
-                "Bản chất sự việc cho thấy nhiều tình tiết phức tạp cần được làm sáng tỏ ngay để bảo vệ quyền lợi người dân."
-            )
-        else:
-            result["body"] = (
-                "Vụ việc đang thu hút sự chú ý đặc biệt từ dư luận với nhiều tình tiết phức tạp, "
-                "bất thường cần được cơ quan chức năng làm sáng tỏ ngay để bảo vệ cộng đồng và người tiêu dùng."
-            )
+        result["body"] = _build_viral_body(clean_title, clean_summary)
 
     if not result.get("cta"):
-        result["cta"] = "Bạn nghĩ sao về vụ việc này? Chia sẻ ngay dưới bình luận để cùng thảo luận nhé!"
+        result["cta"] = _build_viral_cta(clean_title)
 
     if not result.get("hashtags"):
-        result["hashtags"] = ["#bocme", "#review", "#trending", "#tiktoknews"]
+        result["hashtags"] = ["#bocme", "#review", "#trending", "#tiktoknews", "#tintuc24h"]
 
     if not result.get("muse_visual_prompt"):
         result["muse_visual_prompt"] = (
-            "Vertical 9:16 aspect ratio video, dramatic cinematic lighting, investigative realism, "
-            "moody atmosphere, photorealistic 4K, cinematic slow dolly push-in, intense investigative scene."
+            f"Vertical 9:16 aspect ratio video, dramatic cinematic lighting, investigative realism, "
+            f"moody atmosphere, photorealistic 4K, cinematic slow dolly push-in regarding {clean_title or 'investigative news'}."
         )
 
     if not result.get("full_script"):
         result["full_script"] = f"{result['hook']}\n\n{result['body']}\n\n{result['cta']}\n\n{' '.join(result['hashtags'])}"
 
     # 5. Phân cảnh đa hồi (Multi-Scene Storyboard)
+    body_str = str(result["body"])
+    body_words = body_str.split()
+    mid = max(10, len(body_words) // 2)
+    body_p1 = " ".join(body_words[:mid])
+    body_p2 = " ".join(body_words[mid:]) if len(body_words) > mid else "Các bằng chứng số liệu tiếp tục được cơ quan chức năng làm rõ."
+
     raw_scenes = result.get("scenes")
     if not isinstance(raw_scenes, list) or len(raw_scenes) < 4:
-        body_words = result["body"].split()
-        mid = max(10, len(body_words) // 2)
-        body_p1 = " ".join(body_words[:mid])
-        body_p2 = " ".join(body_words[mid:]) if len(body_words) > mid else "Các bằng chứng số liệu tiếp tục được cơ quan chức năng làm rõ."
+        scenes: List[SceneItem] = []
+        for i in range(1, 5):
+            ipd = _build_default_image_prompt_detail(i, clean_title)
+            vp = _format_visual_prompt_from_detail(ipd)
+            if i == 1:
+                title_s = "Scene 1 - Hook"
+                dur = 3
+                voice = str(result["hook"])
+                motion = "slow dolly push-in"
+            elif i == 2:
+                title_s = "Scene 2 - Bóc Tách Sự Thật"
+                dur = 6
+                voice = body_p1
+                motion = "pan left to right"
+            elif i == 3:
+                title_s = "Scene 3 - Bằng Chứng & Hệ Quả"
+                dur = 5
+                voice = body_p2
+                motion = "slow tilt down"
+            else:
+                title_s = "Scene 4 - Payoff / CTA"
+                dur = 5
+                voice = str(result["cta"])
+                motion = "center focal hold"
 
-        result["scenes"] = [
-            {
-                "scene_num": 1,
-                "title": "Scene 1 - Hook Giật Gân",
-                "duration_sec": 4,
-                "voice_text": result["hook"],
-                "visual_prompt": f"Vertical 9:16 aspect ratio video, close-up dramatic cinematic lighting, investigative tension regarding {clean_title or 'hot news'}, photorealistic 4K, slow dolly push-in",
-                "camera_motion": "slow dolly push-in"
-            },
-            {
-                "scene_num": 2,
-                "title": "Scene 2 - Bóc Tách Sự Thật",
-                "duration_sec": 6,
-                "voice_text": body_p1,
-                "visual_prompt": f"Vertical 9:16 aspect ratio video, medium documentary shot, uncovering core mechanism of {clean_title or 'event'}, cinematic shadows, 4K, slow pan left to right",
-                "camera_motion": "pan left to right"
-            },
-            {
-                "scene_num": 3,
-                "title": "Scene 3 - Bằng Chứng & Hệ Quả",
-                "duration_sec": 5,
-                "voice_text": body_p2,
-                "visual_prompt": f"Vertical 9:16 aspect ratio video, analytical evidence tension, sharp focus on documents and key subjects, moody ambiance, 4K, slow tilt down",
-                "camera_motion": "slow tilt down"
-            },
-            {
-                "scene_num": 4,
-                "title": "Scene 4 - Kêu Gọi Tranh Luận",
-                "duration_sec": 5,
-                "voice_text": result["cta"],
-                "visual_prompt": f"Vertical 9:16 aspect ratio video, dramatic conclusion focal hold, high impact lighting, 4K photorealistic, center focal hold",
-                "camera_motion": "center focal hold"
-            }
-        ]
+            scenes.append({
+                "scene_num": i,
+                "title": title_s,
+                "duration_sec": dur,
+                "voice_text": voice,
+                "visual_prompt": vp,
+                "camera_motion": motion,
+                "image_prompt_detail": ipd
+            })
+        result["scenes"] = scenes
     else:
-        normalized_scenes = []
+        normalized_scenes: List[SceneItem] = []
         for i, sc in enumerate(raw_scenes[:4], 1):
             if isinstance(sc, dict):
+                vp = str(sc.get("visual_prompt") or result["muse_visual_prompt"]).strip()
+                raw_ipd = sc.get("image_prompt_detail")
+                default_ipd = _build_default_image_prompt_detail(i, clean_title)
+                if isinstance(raw_ipd, dict) and all(k in raw_ipd for k in ("subject", "lighting", "camera_angle", "color_tone", "art_style")):
+                    ipd = {
+                        "subject": str(raw_ipd.get("subject") or default_ipd["subject"]).strip(),
+                        "lighting": str(raw_ipd.get("lighting") or default_ipd["lighting"]).strip(),
+                        "camera_angle": str(raw_ipd.get("camera_angle") or default_ipd["camera_angle"]).strip(),
+                        "color_tone": str(raw_ipd.get("color_tone") or default_ipd["color_tone"]).strip(),
+                        "art_style": str(raw_ipd.get("art_style") or default_ipd["art_style"]).strip(),
+                    }
+                else:
+                    ipd = default_ipd
+
+                if not vp:
+                    vp = _format_visual_prompt_from_detail(ipd)
+                elif ("9:16" not in vp) and ("vertical" not in vp.lower()):
+                    vp = f"Vertical 9:16 aspect ratio video, {vp}"
+
+                default_title = "Scene 1 - Hook" if i == 1 else ("Scene 2 - Bóc Tách Sự Thật" if i == 2 else ("Scene 3 - Bằng Chứng & Hệ Quả" if i == 3 else "Scene 4 - Payoff / CTA"))
+                default_voice = result["hook"] if i == 1 else (result["cta"] if i == 4 else (body_p1 if i == 2 else body_p2))
+                default_motion = "slow dolly push-in" if i == 1 else ("pan left to right" if i == 2 else ("slow tilt down" if i == 3 else "center focal hold"))
+
                 normalized_scenes.append({
-                    "scene_num": sc.get("scene_num") or i,
-                    "title": sc.get("title") or f"Scene {i}",
-                    "duration_sec": int(sc.get("duration_sec") or (4 if i == 1 else (6 if i == 2 else 5))),
-                    "voice_text": str(sc.get("voice_text") or (result["hook"] if i == 1 else (result["cta"] if i == 4 else result["body"][:80]))).strip(),
-                    "visual_prompt": str(sc.get("visual_prompt") or result["muse_visual_prompt"]).strip(),
-                    "camera_motion": str(sc.get("camera_motion") or "slow dolly push-in").strip()
+                    "scene_num": int(sc.get("scene_num") or i),
+                    "title": str(sc.get("title") or default_title).strip(),
+                    "duration_sec": int(sc.get("duration_sec") or (3 if i == 1 else (6 if i == 2 else 5))),
+                    "voice_text": str(sc.get("voice_text") or default_voice).strip(),
+                    "visual_prompt": vp,
+                    "camera_motion": str(sc.get("camera_motion") or default_motion).strip(),
+                    "image_prompt_detail": ipd
                 })
         result["scenes"] = normalized_scenes
 
@@ -556,20 +705,17 @@ parse_script_json = self_healing_json_parser
 # ==============================================================================
 def safe_script_fallback(title: str, summary: str, engine: str = "gemini") -> Dict[str, object]:
     """Cơ chế sinh kịch bản dự phòng tất định khi toàn bộ kết nối AI gateway bị ngắt."""
-    clean_title = title.strip()[:60] if title else "Tin nóng mới nhất"
-    clean_summary = summary.strip()[:140] if summary else "Diễn biến sự việc đang thu hút sự chú ý đặc biệt."
+    clean_title = str(title or "").strip()[:60]
+    clean_summary = str(summary or "").strip()[:140]
 
-    hook = f"Sự thật chấn động: {clean_title}?"
-    body = (
-        f"Theo thông tin mới nhất, {clean_summary}. "
-        "Bản chất sự việc cho thấy nhiều dấu hiệu bất thường và thủ đoạn tinh vi cần được làm rõ ngay để bảo vệ quyền lợi người dân."
-    )
-    cta = "Mất tiền do nhẹ dạ hay do buông lỏng quản lý? Để lại bình luận tranh luận ngay bên dưới!"
+    hook = _build_viral_hook(clean_title)
+    body = _build_viral_body(clean_title, clean_summary)
+    cta = _build_viral_cta(clean_title)
     hashtags = ["#bocme", "#trending", "#tiktoknews", "#review", "#tintuc24h"]
     full_script = f"{hook} {body} {cta} {' '.join(hashtags)}"
     prompt = (
-        f"Vertical 9:16 cinematic shot, dramatic cinematic lighting, investigative realism, "
-        f"breaking news scene regarding {clean_title}, 4K photorealistic resolution."
+        f"Vertical 9:16 aspect ratio video, dramatic cinematic lighting, investigative realism, "
+        f"breaking news scene regarding {clean_title or 'investigative news'}, 4K photorealistic resolution, cinematic slow dolly push-in."
     )
 
     base: Dict[str, object] = {
@@ -595,7 +741,7 @@ def execute_chat_completion(
     api_key: str,
     models: List[str],
     messages: List[Dict[str, str]],
-    timeout: float = 35.0
+    timeout: float = 12.0
 ) -> Tuple[str, str]:
     """Thực hiện HTTP POST /chat/completions với cơ chế thử lại trên danh sách model ứng viên."""
     headers = {
@@ -618,7 +764,7 @@ def execute_chat_completion(
                 f"{base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=(3.0, timeout)
+                timeout=(2.0, timeout)
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -693,14 +839,14 @@ def generate_tiktok_script(
         models = resolve_model_candidates("muse", base_url)
 
         try:
-            raw_text, used_model = execute_chat_completion(base_url, api_key, models, messages, timeout=35.0)
+            raw_text, used_model = execute_chat_completion(base_url, api_key, models, messages, timeout=12.0)
         except Exception as primary_err:
             logger.warning("Muse provider gặp lỗi: %s. Tự động chuyển đổi dự phòng sang Gemini 3.8 Flash...", primary_err)
             try:
                 gemini_url = detect_router_base_url()
                 gemini_key = os.getenv("ROUTER_API_KEY", os.getenv("GEMINI_API_KEY", ""))
                 gemini_models = resolve_model_candidates("gemini", gemini_url)
-                raw_text, used_model = execute_chat_completion(gemini_url, gemini_key, gemini_models, messages, timeout=35.0)
+                raw_text, used_model = execute_chat_completion(gemini_url, gemini_key, gemini_models, messages, timeout=12.0)
                 actual_engine = "muse (fallback: gemini)"
             except Exception as gemini_err:
                 if use_safe_fallback:
@@ -715,7 +861,7 @@ def generate_tiktok_script(
         models = resolve_model_candidates("gemini", base_url)
 
         try:
-            raw_text, used_model = execute_chat_completion(base_url, api_key, models, messages, timeout=35.0)
+            raw_text, used_model = execute_chat_completion(base_url, api_key, models, messages, timeout=12.0)
         except Exception as primary_err:
             if use_safe_fallback:
                 logger.error("Gemini Gateway thất bại (%s). Kích hoạt SafeScriptFallback...", primary_err)

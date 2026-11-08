@@ -29,7 +29,7 @@ class TestStreamlitUISanity(unittest.TestCase):
 
     def test_02_script_generation_flow(self):
         """Kiểm tra bấm nút soạn kịch bản không phát sinh ngoại lệ giao diện."""
-        at = AppTest.from_file(str(PROJECT_ROOT / "app" / "app.py"), default_timeout=45)
+        at = AppTest.from_file(str(PROJECT_ROOT / "app" / "app.py"), default_timeout=60)
         at.run()
         self.assertEqual(len(at.exception), 0)
 

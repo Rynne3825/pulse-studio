@@ -8,6 +8,8 @@ THE PULSE EDITORIAL - THE ATELIER (CỘT TRÁI: PRODUCTION STUDIO & XU HƯỚNG 
 """
 
 import html
+import time
+import tempfile
 import streamlit as st
 from typing import Dict, Tuple, Optional
 from pathlib import Path
@@ -15,7 +17,7 @@ from pathlib import Path
 from src.scraper.rss_scraper import fetch_trending_news
 from src.preprocessing.trend_extractor import extract_trending_topics
 from src.ai.generator import generate_tiktok_script
-from src.video.muse_integration import generate_tiktok_video
+from src.video.muse_integration import generate_tiktok_video, SafeFallbackSynthesizer, THEME_PRESETS
 from app.components.editorial_utils import is_safe_url, render_clean_html
 
 
@@ -35,6 +37,12 @@ def render_editorial_atelier() -> Tuple[str, Optional[Dict[str, object]], str, D
         st.session_state.current_script_data = {}
     if "generated_video_result" not in st.session_state:
         st.session_state.generated_video_result = None
+    if "video_theme_select" not in st.session_state:
+        st.session_state.video_theme_select = "editorial"
+    if "editorial_card_preview_path" not in st.session_state:
+        st.session_state.editorial_card_preview_path = None
+    if "editorial_card_preview_time" not in st.session_state:
+        st.session_state.editorial_card_preview_time = 0.0
 
     # === PHẦN 1: NGUỒN CẢM HỨNG BÁO CHÍ & XU HƯỚNG (TREND RADAR) ===
     with st.container(border=True):
@@ -158,7 +166,7 @@ def render_editorial_atelier() -> Tuple[str, Optional[Dict[str, object]], str, D
                     try:
                         title = selected_article.get("title", "")
                         summary = selected_article.get("summary", "")
-                        script_res = generate_tiktok_script(title=title, summary=summary, engine=script_engine)
+                        script_res = generate_tiktok_script(title=title, summary=summary, engine=script_engine, safe_fallback=True)
 
                         # Lưu trữ vào session state
                         st.session_state.current_script_data = script_res
@@ -233,6 +241,70 @@ def render_editorial_atelier() -> Tuple[str, Optional[Dict[str, object]], str, D
                 key="video_render_mode_select"
             )
 
+        # Lựa chọn Visual & Graphic Theme (Milestone 1)
+        col_theme, col_preview_btn = st.columns([8, 4])
+        theme_keys = list(THEME_PRESETS.keys())
+        with col_theme:
+            v_theme = st.selectbox(
+                "Phong cách Visual & Graphic Theme:",
+                options=theme_keys,
+                format_func=lambda k: f"🎨 {THEME_PRESETS[k]['name']} — {THEME_PRESETS[k]['description'][:48]}...",
+                key="video_theme_select"
+            )
+            active_theme = THEME_PRESETS.get(v_theme, THEME_PRESETS["editorial"])
+            swatches_html = "".join([
+                f'<span style="display:inline-block;width:16px;height:16px;border-radius:4px;background-color:{c};border:1px solid rgba(0,0,0,0.25);margin-right:4px;vertical-align:middle;" title="{c}"></span>'
+                for c in active_theme.get("swatches", [])
+            ])
+            render_clean_html(
+                f"""
+                <div style="display:flex;align-items:center;margin-top:2px;margin-bottom:6px;font-size:0.75rem;color:#475569;">
+                    <span style="font-weight:600;margin-right:6px;">Bảng màu theme:</span>
+                    {swatches_html}
+                    <span style="margin-left:6px;color:#64748B;">({active_theme['description']})</span>
+                </div>
+                """
+            )
+
+        with col_preview_btn:
+            st.write("")  # Cân chỉnh khoảng cách dọc
+            preview_card_clicked = st.button("👁 Xem Trước Card (<0.1s)", key="btn_preview_card", use_container_width=True)
+
+        # Xử lý render card preview tức thì (<0.1s)
+        if preview_card_clicked:
+            preview_title = (selected_article.get("title", "TIÊU ĐỀ XU HƯỚNG") if selected_article else "TIÊU ĐỀ XU HƯỚNG")[:30]
+            preview_text = content.strip()[:140] if content.strip() else "Khám phá phong cách đồ họa độc quyền từ Pulse Studio với chuẩn định dạng TikTok dọc 9:16."
+            with st.spinner("Đang kết xuất nhanh mẫu Card 9:16..."):
+                try:
+                    synth = SafeFallbackSynthesizer()
+                    active_theme_cfg = THEME_PRESETS.get(v_theme, THEME_PRESETS["editorial"])
+                    preview_dir = Path(tempfile.gettempdir()) / "pulse_preview_cards"
+                    preview_dir.mkdir(parents=True, exist_ok=True)
+                    t_card_start = time.perf_counter()
+                    preview_card_p = synth._generate_card(
+                        title=preview_title,
+                        headline=preview_text,
+                        color=active_theme_cfg["title_color"],
+                        ref_image_path=None,
+                        temp_dir=preview_dir,
+                        scene_num=1,
+                        theme=v_theme
+                    )
+                    t_card_elapsed = time.perf_counter() - t_card_start
+                    st.session_state["editorial_card_preview_path"] = str(preview_card_p)
+                    st.session_state["editorial_card_preview_time"] = t_card_elapsed
+                    st.toast(f"Đã render card trong {t_card_elapsed*1000:.1f}ms (<0.1s)!", icon="⚡")
+                except Exception as ex:
+                    st.error(f"Lỗi tạo preview card: {ex}")
+
+        # Hiển thị ảnh Card Preview nếu có
+        if st.session_state.get("editorial_card_preview_path"):
+            card_p_str = st.session_state["editorial_card_preview_path"]
+            if Path(card_p_str).exists():
+                elapsed_ms = st.session_state.get("editorial_card_preview_time", 0.0) * 1000
+                with st.expander(f"🖼 Mẫu Card đồ họa 720x1280 (Thời gian render: {elapsed_ms:.1f}ms · Theme: {THEME_PRESETS.get(v_theme, {}).get('name', v_theme)})", expanded=True):
+                    st.image(card_p_str, caption=f"Mẫu Card 9:16 — Theme: {THEME_PRESETS.get(v_theme, {}).get('name', v_theme)} ({elapsed_ms:.1f}ms)", width=320)
+
         render_video_clicked = st.button("🎬 Dựng Video TikTok Studio (4 Phân Cảnh)", key="btn_render_video", use_container_width=True)
 
         if render_video_clicked:
@@ -251,7 +323,8 @@ def render_editorial_atelier() -> Tuple[str, Optional[Dict[str, object]], str, D
                             script_data=current_script or {"hook": content[:40], "body": content, "cta": "Xem thêm!"},
                             mode=v_mode,
                             duration=v_dur,
-                            voice=v_voice
+                            voice=v_voice,
+                            theme=v_theme
                         )
                         st.session_state.generated_video_result = v_res
                         st.toast("Đã xuất bản video TikTok 9:16 thành công!", icon="🎬")

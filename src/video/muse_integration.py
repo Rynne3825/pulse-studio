@@ -16,7 +16,7 @@ import concurrent.futures
 import urllib.request
 import urllib.parse
 from datetime import datetime
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union, Tuple, Any
 from pathlib import Path
 
 import requests
@@ -58,19 +58,46 @@ def find_ffmpeg_binary() -> str:
     return "ffmpeg"
 
 
-def _get_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
-    """Tự động tải font TrueType Segoe UI / Arial với fallback an toàn."""
-    candidates = (
-        [
-            r"C:\Windows\Fonts\segoeuib.ttf",
-            r"C:\Windows\Fonts\arialbd.ttf",
-        ]
+def _get_font(size: int, bold: bool = False, font_family: Optional[str] = None) -> ImageFont.ImageFont:
+    """Tự động tải font TrueType Windows với fallback an toàn theo font_family."""
+    family_candidates: Dict[str, Dict[str, List[str]]] = {
+        "georgia": {
+            "bold": [r"C:\Windows\Fonts\georgiab.ttf", r"C:\Windows\Fonts\georgia.ttf"],
+            "regular": [r"C:\Windows\Fonts\georgia.ttf"],
+        },
+        "bahnschrift": {
+            "bold": [r"C:\Windows\Fonts\bahnschrift.ttf"],
+            "regular": [r"C:\Windows\Fonts\bahnschrift.ttf"],
+        },
+        "consola": {
+            "bold": [r"C:\Windows\Fonts\consolab.ttf", r"C:\Windows\Fonts\consola.ttf"],
+            "regular": [r"C:\Windows\Fonts\consola.ttf"],
+        },
+        "segoeui": {
+            "bold": [r"C:\Windows\Fonts\segoeuib.ttf", r"C:\Windows\Fonts\segoeui.ttf"],
+            "regular": [r"C:\Windows\Fonts\segoeui.ttf"],
+        },
+        "arial": {
+            "bold": [r"C:\Windows\Fonts\arialbd.ttf", r"C:\Windows\Fonts\arial.ttf"],
+            "regular": [r"C:\Windows\Fonts\arial.ttf"],
+        },
+    }
+
+    candidates: List[str] = []
+    if font_family and font_family.lower() in family_candidates:
+        fam = family_candidates[font_family.lower()]
+        candidates.extend(fam["bold"] if bold else fam["regular"])
+
+    # Fallback tiêu chuẩn Segoe UI / Arial
+    fallback = (
+        [r"C:\Windows\Fonts\segoeuib.ttf", r"C:\Windows\Fonts\arialbd.ttf"]
         if bold
-        else [
-            r"C:\Windows\Fonts\segoeui.ttf",
-            r"C:\Windows\Fonts\arial.ttf",
-        ]
+        else [r"C:\Windows\Fonts\segoeui.ttf", r"C:\Windows\Fonts\arial.ttf"]
     )
+    for c in fallback:
+        if c not in candidates:
+            candidates.append(c)
+
     for c in candidates:
         if os.path.isfile(c):
             try:
@@ -253,6 +280,173 @@ def synthesize_voiceover(
     return False
 
 
+# ==============================================================================
+# HỆ THỐNG PRESET THEME ĐỒ HỌA & VISUAL DỰNG VIDEO (MILESTONE 1)
+# ==============================================================================
+THEME_PRESETS: Dict[str, Dict[str, Any]] = {
+    "editorial": {
+        "id": "editorial",
+        "name": "Editorial Classic",
+        "description": "Tạp chí cổ điển, thanh lịch với tông trầm sang trọng và chữ có chân Georgia",
+        "font_family": "georgia",
+        "title_color": (245, 158, 11),       # Amber Gold
+        "headline_color": (255, 255, 255),    # Pure White
+        "meta_color": (148, 163, 184),        # Slate 400
+        "bg_gradient_start": (15, 23, 42),    # Slate 900
+        "bg_gradient_end": (24, 24, 37),      # Deep Charcoal
+        "banner_bg": (30, 41, 59),            # Slate 800
+        "banner_border": (245, 158, 11),      # Amber
+        "panel_bg": (24, 24, 37),             # Charcoal
+        "panel_border": (71, 85, 105),        # Slate 600
+        "card_border": (245, 158, 11),        # Amber Accent
+        "badge_bg": (30, 41, 59),
+        "scene_colors": [
+            (239, 68, 68),   # Đỏ Hook
+            (59, 130, 246),  # Xanh Body
+            (168, 85, 247),  # Tím Evidence
+            (245, 158, 11),  # Vàng Cam CTA
+        ],
+        "motions": [
+            "zoompan=z='min(zoom+0.0015,1.20)':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='1.1':d={fps_dur}:x='iw/2-(iw/zoom/2)+sin(on/30)*20':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='max(1.20-0.0015*on,1.0)':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='1.05':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+        ],
+        "single_motion": "zoompan=z='min(zoom+0.0015,1.25)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+        "tags": "#ThePulse #TikTokTrending #PhanTichXuHuong",
+        "swatches": ["#0F172A", "#F59E0B", "#FFFFFF", "#94A3B8"],
+    },
+    "vibrant": {
+        "id": "vibrant",
+        "name": "Vibrant Energy",
+        "description": "Sôi động, kích thích thị giác với sắc đỏ cam bùng nổ và chuyển động nhịp độ cao",
+        "font_family": "bahnschrift",
+        "title_color": (255, 90, 60),        # Vibrant Coral/Orange
+        "headline_color": (255, 255, 255),    # Pure White
+        "meta_color": (251, 191, 36),         # Amber 400
+        "bg_gradient_start": (45, 10, 20),    # Deep Crimson Red
+        "bg_gradient_end": (20, 6, 28),       # Dark Plum
+        "banner_bg": (65, 14, 28),            # Crimson Slate
+        "banner_border": (255, 60, 60),       # Bright Coral
+        "panel_bg": (38, 12, 26),             # Rich Burgundy
+        "panel_border": (244, 63, 94),        # Rose 500
+        "card_border": (255, 75, 43),         # Hot Orange
+        "badge_bg": (60, 16, 28),
+        "scene_colors": [
+            (255, 59, 48),   # Hook Red
+            (255, 149, 0),   # Body Orange
+            (255, 204, 0),   # Evidence Gold
+            (255, 45, 85),   # CTA Hot Pink
+        ],
+        "motions": [
+            "zoompan=z='min(zoom+0.003,1.30)':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='1.15':d={fps_dur}:x='iw/2-(iw/zoom/2)+sin(on/15)*40':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='max(1.30-0.003*on,1.05)':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='min(zoom+0.002,1.2)':d={fps_dur}:x='iw/2-(iw/zoom/2)+cos(on/20)*25':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+        ],
+        "single_motion": "zoompan=z='min(zoom+0.0025,1.3)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+        "tags": "#ThePulse #VibrantEnergy #TikTokViral #TrendingNow",
+        "swatches": ["#FF3B30", "#FF9500", "#FFCC00", "#FF2D55"],
+    },
+    "neon": {
+        "id": "neon",
+        "name": "Neon Cyberpunk",
+        "description": "Ánh sáng neon đêm tối, viền ngọc lam rực rỡ và magenta siêu thực",
+        "font_family": "bahnschrift",
+        "title_color": (0, 245, 255),         # Electric Cyan
+        "headline_color": (255, 255, 255),    # Pure White
+        "meta_color": (224, 86, 253),         # Neon Purple
+        "bg_gradient_start": (8, 10, 26),     # Midnight Abyss
+        "bg_gradient_end": (18, 6, 32),       # Dark Cyber Magenta
+        "banner_bg": (16, 18, 42),            # Dark Indigo
+        "banner_border": (0, 240, 255),       # Neon Cyan
+        "panel_bg": (18, 14, 38),             # Dark Neon Purple
+        "panel_border": (255, 0, 128),        # Hot Neon Pink
+        "card_border": (0, 245, 255),         # Cyan Outline
+        "badge_bg": (20, 20, 48),
+        "scene_colors": [
+            (0, 245, 255),   # Cyan Hook
+            (255, 0, 128),   # Pink Body
+            (189, 0, 255),   # Purple Evidence
+            (0, 255, 136),   # Neon Green CTA
+        ],
+        "motions": [
+            "zoompan=z='min(zoom+0.002,1.25)':d={fps_dur}:x='iw/2-(iw/zoom/2)+sin(on/20)*25':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='1.12':d={fps_dur}:x='iw/2-(iw/zoom/2)+cos(on/22)*25':s=720x1280:fps=25",
+            "zoompan=z='max(1.25-0.002*on,1.0)':d={fps_dur}:x='iw/2-(iw/zoom/2)+sin(on/18)*30':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='1.08':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+        ],
+        "single_motion": "zoompan=z='min(zoom+0.002,1.25)':d={total_frames}:x='iw/2-(iw/zoom/2)+sin(on/25)*20':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+        "tags": "#ThePulse #Cyberpunk #NeonVibes #TechTrending",
+        "swatches": ["#00F5FF", "#FF0080", "#BD00FF", "#00FF88"],
+    },
+    "tech": {
+        "id": "tech",
+        "name": "Tech Futuristic",
+        "description": "Giao diện kỹ thuật số tối giản, font Consolas monospace và sắc xanh công nghệ",
+        "font_family": "consola",
+        "title_color": (56, 189, 248),        # Sky Blue 400
+        "headline_color": (241, 245, 249),    # Slate 100
+        "meta_color": (52, 211, 153),         # Emerald 400
+        "bg_gradient_start": (6, 18, 30),     # Dark Tech Teal
+        "bg_gradient_end": (10, 28, 48),      # Deep Cobalt
+        "banner_bg": (12, 32, 54),            # Tech Slate
+        "banner_border": (14, 165, 233),      # Sky Blue 500
+        "panel_bg": (10, 26, 44),             # Dark Cyan Panel
+        "panel_border": (56, 189, 248),       # Sky Blue 400
+        "card_border": (14, 165, 233),        # Tech Outline
+        "badge_bg": (14, 38, 64),
+        "scene_colors": [
+            (14, 165, 233),  # Sky Blue Hook
+            (16, 185, 129),  # Emerald Body
+            (99, 102, 241),  # Indigo Evidence
+            (245, 158, 11),  # Amber CTA
+        ],
+        "motions": [
+            "zoompan=z='min(zoom+0.0018,1.22)':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='1.08':d={fps_dur}:x='iw/2-(iw/zoom/2)+on*0.5':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='max(1.22-0.0018*on,1.02)':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='1.05':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+        ],
+        "single_motion": "zoompan=z='min(zoom+0.0018,1.22)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+        "tags": "#ThePulse #TechNews #AIInnovation #FutureTech",
+        "swatches": ["#0EA5E9", "#10B981", "#6366F1", "#38BDF8"],
+    },
+    "pastel": {
+        "id": "pastel",
+        "name": "Pastel Soft",
+        "description": "Tông màu ngọt ngào, dịu mắt, thân thiện và ấm áp với phong cách thanh thoát",
+        "font_family": "segoeui",
+        "title_color": (251, 146, 60),        # Peach 400
+        "headline_color": (255, 255, 255),    # Pure White
+        "meta_color": (147, 197, 253),        # Soft Sky Blue
+        "bg_gradient_start": (36, 26, 44),    # Muted Plum
+        "bg_gradient_end": (22, 28, 44),      # Twilight Lavender
+        "banner_bg": (48, 38, 58),            # Soft Violet Slate
+        "banner_border": (244, 114, 182),     # Soft Pink 400
+        "panel_bg": (38, 32, 50),             # Soft Charcoal Lavender
+        "panel_border": (192, 132, 252),      # Soft Purple 400
+        "card_border": (244, 114, 182),       # Pink Outline
+        "badge_bg": (52, 42, 64),
+        "scene_colors": [
+            (244, 114, 182), # Soft Pink Hook
+            (192, 132, 252), # Soft Purple Body
+            (147, 197, 253), # Soft Blue Evidence
+            (251, 146, 60),  # Peach CTA
+        ],
+        "motions": [
+            "zoompan=z='min(zoom+0.001,1.15)':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='1.06':d={fps_dur}:x='iw/2-(iw/zoom/2)+sin(on/35)*15':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='max(1.15-0.001*on,1.0)':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+            "zoompan=z='1.04':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+        ],
+        "single_motion": "zoompan=z='min(zoom+0.001,1.15)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
+        "tags": "#ThePulse #PastelAesthetic #SoftLife #ViralTrends",
+        "swatches": ["#F472B6", "#C084FC", "#93C5FD", "#FB923C"],
+    },
+}
+
+
 class MuseAIClient:
     """Client giao tiếp với Muse AI Video Generation API (czg86389-hub/muse2api & proxy)."""
 
@@ -401,27 +595,40 @@ class SafeFallbackSynthesizer:
         color: Tuple[int, int, int],
         ref_image_path: Optional[Path],
         temp_dir: Path,
-        scene_num: int = 1
+        scene_num: int = 1,
+        theme: str = "editorial"
     ) -> Path:
-        """Tạo card đồ họa 720x1280 9:16 độ nét cao với typography Segoe UI lớn và gradient hiện đại."""
-        out_p = temp_dir / f"card_{scene_num}.png"
-        img = Image.new("RGB", (720, 1280), (15, 23, 42))
+        """Tạo card đồ họa 720x1280 9:16 độ nét cao theo preset theme màu sắc và typography TrueType."""
+        out_p = Path(temp_dir) / f"card_{scene_num}.png"
+        theme_key = theme.lower().strip() if isinstance(theme, str) else "editorial"
+        theme_cfg = THEME_PRESETS.get(theme_key, THEME_PRESETS["editorial"])
+        safe_title = str(title or "").strip()
+        safe_headline = str(headline or "").strip()
+
+        img = Image.new("RGB", (720, 1280), theme_cfg["bg_gradient_start"])
         draw = ImageDraw.Draw(img)
 
-        # Typography TrueType Segoe UI / Arial
-        f_brand = _get_font(26, bold=True)
-        f_badge = _get_font(28, bold=True)
-        f_headline = _get_font(38, bold=True)
-        f_meta = _get_font(24, bold=False)
+        # Typography TrueType theo theme font stack
+        font_fam = theme_cfg.get("font_family", "segoeui")
+        f_brand = _get_font(26, bold=True, font_family=font_fam)
+        f_badge = _get_font(28, bold=True, font_family=font_fam)
+        f_headline = _get_font(38, bold=True, font_family=font_fam)
+        f_meta = _get_font(24, bold=False, font_family=font_fam)
 
-        # Nền ảnh hoặc gradient hiện đại
-        if ref_image_path and ref_image_path.exists():
+        # Màu nhấn: ưu tiên color do caller chỉ định nếu khác None
+        accent_color = color if color is not None else theme_cfg["title_color"]
+
+        # Nền ảnh hoặc gradient hiện đại theo theme
+        ref_p = Path(ref_image_path) if ref_image_path else None
+        if ref_p and ref_p.exists():
             try:
-                with Image.open(ref_image_path) as ref_img:
+                with Image.open(ref_p) as ref_img:
                     rgb = ref_img.convert("RGB")
                     bg_blur = rgb.resize((720, 1280), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(radius=25))
                     img.paste(bg_blur, (0, 0))
-                    overlay = Image.new("RGBA", (720, 1280), (15, 23, 42, 185))
+                    # Overlay với màu chủ đạo của theme
+                    tint_r, tint_g, tint_b = theme_cfg["bg_gradient_start"]
+                    overlay = Image.new("RGBA", (720, 1280), (tint_r, tint_g, tint_b, 185))
                     img.paste(overlay, (0, 0), overlay)
 
                     scale = min(620.0 / rgb.width, 460.0 / rgb.height)
@@ -430,24 +637,30 @@ class SafeFallbackSynthesizer:
             except Exception:
                 pass
         else:
-            # Subtle dark gradient
+            # Gradient dọc mượt mà theo bảng màu của theme
+            c_start = theme_cfg["bg_gradient_start"]
+            c_end = theme_cfg["bg_gradient_end"]
             for y in range(1280):
                 ratio = y / 1280.0
-                r = int(15 * (1 - ratio) + 24 * ratio)
-                g = int(23 * (1 - ratio) + 24 * ratio)
-                b = int(42 * (1 - ratio) + 37 * ratio)
+                r = int(c_start[0] * (1 - ratio) + c_end[0] * ratio)
+                g = int(c_start[1] * (1 - ratio) + c_end[1] * ratio)
+                b = int(c_start[2] * (1 - ratio) + c_end[2] * ratio)
                 draw.line([(0, y), (720, y)], fill=(r, g, b))
 
+        # Khung viền ngoài tinh tế (Card Accent Border)
+        card_border_color = theme_cfg.get("card_border", accent_color)
+        draw.rounded_rectangle([(16, 16), (704, 1264)], radius=20, outline=card_border_color, width=2)
+
         # Top Banner
-        draw.rounded_rectangle([(40, 60), (680, 140)], radius=18, fill=(30, 41, 59), outline=color, width=3)
-        draw.text((65, 82), f"THE PULSE STUDIO — {title.upper()[:30]}", font=f_brand, fill=color)
+        draw.rounded_rectangle([(40, 60), (680, 140)], radius=18, fill=theme_cfg["banner_bg"], outline=accent_color, width=3)
+        draw.text((65, 82), f"THE PULSE STUDIO — {safe_title.upper()[:30]}", font=f_brand, fill=accent_color)
 
         # Glassmorphic Box
-        draw.rounded_rectangle([(40, 710), (680, 1110)], radius=24, fill=(24, 24, 37), outline=(71, 85, 105), width=2)
-        draw.text((65, 735), f"[{title.upper()[:28]}]", font=f_badge, fill=color)
+        draw.rounded_rectangle([(40, 710), (680, 1110)], radius=24, fill=theme_cfg["panel_bg"], outline=theme_cfg["panel_border"], width=2)
+        draw.text((65, 735), f"[{safe_title.upper()[:28]}]", font=f_badge, fill=accent_color)
 
         # Tự động ngắt dòng đo theo kích thước font thực tế
-        clean = re.sub(r"\s+", " ", headline).strip()
+        clean = re.sub(r"\s+", " ", safe_headline).strip()
         words = clean.split()
         lines: List[str] = []
         cur_words: List[str] = []
@@ -464,10 +677,19 @@ class SafeFallbackSynthesizer:
 
         y_t = 795
         for l in lines[:5]:
-            draw.text((65, y_t), l, font=f_headline, fill=(255, 255, 255))
+            draw.text((65, y_t), l, font=f_headline, fill=theme_cfg["headline_color"])
             y_t += 52
 
-        draw.text((65, 1160), "#ThePulse #TikTokTrending #PhanTichXuHuong", font=f_meta, fill=(148, 163, 184))
+        # Metadata tags
+        tags_text = theme_cfg.get("tags", "#ThePulse #TikTokTrending #PhanTichXuHuong")
+        draw.text((65, 1160), tags_text, font=f_meta, fill=theme_cfg["meta_color"])
+
+        # Chỉ báo phân cảnh (Scene Progress Pips)
+        for dot_i in range(1, 5):
+            dot_x = 550 + (dot_i - 1) * 28
+            dot_color = accent_color if dot_i == scene_num else theme_cfg["meta_color"]
+            draw.ellipse([(dot_x, 1168), (dot_x + 12, 1180)], fill=dot_color)
+
         img.save(out_p, "PNG")
         return out_p
 
@@ -475,12 +697,14 @@ class SafeFallbackSynthesizer:
         self,
         ref_image_url: Optional[str],
         temp_dir: Path,
-        title: str = "TIN TỨC XU HƯỚNG TIKTOK"
+        title: str = "TIN TỨC XU HƯỚNG TIKTOK",
+        theme: str = "editorial"
     ) -> Path:
-        """Chuẩn bị ảnh nền dọc 9:16 (720x1280) cho chế độ đơn phân cảnh."""
+        """Chuẩn bị ảnh nền dọc 9:16 (720x1280) cho chế độ đơn phân cảnh theo theme."""
         # ponytail: delegate to unified _generate_card to avoid code duplication
         local_ref = self._download_image(ref_image_url, temp_dir)
-        return self._generate_card("TIN NÓNG MẠNG XÃ HỘI", title, (245, 158, 11), local_ref, temp_dir, 0)
+        theme_cfg = THEME_PRESETS.get(theme.lower(), THEME_PRESETS["editorial"])
+        return self._generate_card("TIN NÓNG MẠNG XÃ HỘI", title, theme_cfg["title_color"], local_ref, temp_dir, 0, theme=theme)
 
     def _generate_scene_card(
         self,
@@ -489,10 +713,11 @@ class SafeFallbackSynthesizer:
         headline: str,
         color: Tuple[int, int, int],
         ref_image_path: Optional[Path],
-        temp_dir: Path
+        temp_dir: Path,
+        theme: str = "editorial"
     ) -> Path:
-        """Tạo Card hình ảnh 720x1280 chuẩn studio cho từng phân cảnh trong Storyboard."""
-        return self._generate_card(title, headline, color, ref_image_path, temp_dir, scene_num)
+        """Tạo Card hình ảnh 720x1280 chuẩn studio cho từng phân cảnh trong Storyboard theo theme."""
+        return self._generate_card(title, headline, color, ref_image_path, temp_dir, scene_num, theme=theme)
 
     def _generate_ass_subtitle(
         self,
@@ -567,7 +792,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         script_data: ScriptDict,
         ref_image_url: Optional[str] = None,
         duration: int = 20,
-        voice: str = "vi-VN-HoaiMyNeural"
+        voice: str = "vi-VN-HoaiMyNeural",
+        theme: str = "editorial"
     ) -> Dict[str, Union[str, float]]:
         """
         Quy trình dựng video 9:16 thông minh:
@@ -576,6 +802,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         """
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_file = OUTPUT_DIR / f"pulse_{ts}_{duration}s.mp4"
+        theme_key = theme.lower().strip() if isinstance(theme, str) else "editorial"
+        theme_cfg = THEME_PRESETS.get(theme_key, THEME_PRESETS["editorial"])
 
         # ==============================================================================
         # 1. NHÁNH ĐƠN PHÂN CẢNH (Fast Single-Scene cho duration < 10s)
@@ -585,11 +813,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 tmp_dir = Path(tmp_dir_str)
                 title = str(script_data.get("hook", "TIN NÓNG MẠNG XÃ HỘI"))
 
-                bg_img = self._generate_background_image(ref_image_url=ref_image_url, temp_dir=tmp_dir, title=title)
+                bg_img = self._generate_background_image(ref_image_url=ref_image_url, temp_dir=tmp_dir, title=title, theme=theme_key)
                 ass_file = self._generate_ass_subtitle(script_data=script_data, total_duration=float(duration), temp_dir=tmp_dir)
                 ass_path_escaped = str(ass_file).replace("\\", "/").replace(":", "\\:")
 
                 total_frames = int(duration * 25)
+                single_motion = theme_cfg.get(
+                    "single_motion",
+                    "zoompan=z='min(zoom+0.0015,1.25)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25"
+                ).format(total_frames=total_frames)
+
                 cmd = [
                     self.ffmpeg_bin,
                     "-y",
@@ -598,7 +831,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     "-f", "lavfi",
                     "-i", "anullsrc=r=44100:cl=stereo",
                     "-filter_complex",
-                    f"[0:v]zoompan=z='min(zoom+0.0015,1.25)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25,subtitles='{ass_path_escaped}'[v]",
+                    f"[0:v]{single_motion},subtitles='{ass_path_escaped}'[v]",
                     "-map", "[v]",
                     "-map", "1:a",
                     "-c:v", "libx264",
@@ -623,7 +856,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                             "-f", "lavfi",
                             "-i", "anullsrc=r=44100:cl=stereo",
                             "-filter_complex",
-                            f"[0:v]zoompan=z='min(zoom+0.0015,1.2)':d={total_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25[v]",
+                            f"[0:v]{single_motion}[v]",
                             "-map", "[v]",
                             "-map", "1:a",
                             "-c:v", "libx264",
@@ -688,22 +921,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 except Exception:
                     ref_local_img = None
 
-            # Màu nhấn cho từng phân cảnh
-            scene_colors = [
+            # Màu nhấn cho từng phân cảnh theo theme
+            scene_colors = theme_cfg.get("scene_colors", [
                 (239, 68, 68),   # Đỏ Hook
-                (59, 130, 246),   # Xanh Body
+                (59, 130, 246),  # Xanh Body
                 (168, 85, 247),  # Tím Evidence
                 (245, 158, 11)   # Vàng Cam CTA
-            ]
+            ])
 
             # 2.2 Sinh Card hình ảnh và Render từng Clip phân cảnh
             clip_paths: List[Path] = []
-            motions = [
+            motions = theme_cfg.get("motions", [
                 "zoompan=z='min(zoom+0.002,1.25)':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
                 "zoompan=z='1.1':d={fps_dur}:x='iw/2-(iw/zoom/2)+sin(on/25)*30':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
                 "zoompan=z='max(1.25-0.002*on,1.0)':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25",
                 "zoompan=z='1.05':d={fps_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=25"
-            ]
+            ])
 
             scene_timings: List[Tuple[float, float, str, str]] = []
             current_time = 0.0
@@ -718,8 +951,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             for i in range(4):
                 sc = raw_scenes[i]
-                sc_title = sc.get("title", f"Phân cảnh {i+1}")
-                sc_text = sc.get("voice_text", "")
+                sc_title = sc.get("title") or f"Phân cảnh {i+1}"
+                sc_text = sc.get("voice_text") or ""
                 sc_dur = scene_durs[i]
 
                 # Lưu timing cho phụ đề
@@ -737,7 +970,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     headline=sc_text,
                     color=scene_colors[i],
                     ref_image_path=ref_local_img,
-                    temp_dir=tmp_dir
+                    temp_dir=tmp_dir,
+                    theme=theme_key
                 )
 
                 clip_p = tmp_dir / f"clip_scene_{i+1}.mp4"
@@ -772,7 +1006,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             # 2.4 Sinh Voiceover tiếng Việt (edge-tts / Windows SAPI)
             voice_out = tmp_dir / "voiceover.mp3"
-            full_voice_text = " ".join([sc.get("voice_text", "") for sc in raw_scenes])
+            full_voice_text = " ".join([sc.get("voice_text") or "" for sc in raw_scenes])
             has_voice = synthesize_voiceover(text=full_voice_text, out_path=voice_out, voice=voice)
 
             # 2.5 Sinh phụ đề ASS
@@ -876,7 +1110,8 @@ def generate_tiktok_video(
     script_data: Optional[ScriptDict] = None,
     mode: str = "auto",
     duration: int = 20,
-    voice: str = "vi-VN-HoaiMyNeural"
+    voice: str = "vi-VN-HoaiMyNeural",
+    theme: str = "editorial"
 ) -> Dict[str, Union[str, float]]:
     """
     Entrypoint điều phối tạo video TikTok dọc 9:16 (Façade chính cho giao diện Streamlit).
@@ -900,7 +1135,8 @@ def generate_tiktok_video(
             script_data=script_dict,
             ref_image_url=reference_image_url,
             duration=duration,
-            voice=voice
+            voice=voice,
+            theme=theme
         )
 
     # Chế độ ép buộc Muse AI API
@@ -922,5 +1158,6 @@ def generate_tiktok_video(
         script_data=script_dict,
         ref_image_url=reference_image_url,
         duration=duration,
-        voice=voice
+        voice=voice,
+        theme=theme
     )
