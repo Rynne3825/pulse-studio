@@ -12,13 +12,16 @@ import logging
 import tempfile
 import subprocess
 import asyncio
+import concurrent.futures
+import urllib.request
+import urllib.parse
 from datetime import datetime
 from typing import Dict, List, Optional, Union, Tuple
 from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -55,64 +58,124 @@ def find_ffmpeg_binary() -> str:
     return "ffmpeg"
 
 
+def _get_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
+    """Tự động tải font TrueType Segoe UI / Arial với fallback an toàn."""
+    candidates = (
+        [
+            r"C:\Windows\Fonts\segoeuib.ttf",
+            r"C:\Windows\Fonts\arialbd.ttf",
+        ]
+        if bold
+        else [
+            r"C:\Windows\Fonts\segoeui.ttf",
+            r"C:\Windows\Fonts\arial.ttf",
+        ]
+    )
+    for c in candidates:
+        if os.path.isfile(c):
+            try:
+                return ImageFont.truetype(c, size)
+            except Exception:
+                continue
+    try:
+        return ImageFont.load_default()
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _synthesize_edge_tts(text: str, voice: str, out_path: Path) -> bool:
+    """Chạy edge-tts trong worker thread riêng để tránh xung đột event loop Streamlit."""
+    def _worker() -> None:
+        import edge_tts
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            comm = edge_tts.Communicate(text[:600], voice)
+            loop.run_until_complete(comm.save(str(out_path)))
+        finally:
+            loop.close()
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_worker)
+            future.result(timeout=15)
+        return out_path.exists() and out_path.stat().st_size > 500
+    except Exception as e:
+        logger.warning(f"edge-tts ({voice}) thất bại: {e}")
+        return False
+
+
+def _synthesize_google_tts(text: str, out_path: Path) -> bool:
+    """Google Translate TTS (tw-ob client) chuẩn tiếng Việt 100% không phụ thuộc 3rd party."""
+    try:
+        sentences = [s.strip() for s in re.split(r'[,.!?;\n]+', text) if s.strip()]
+        if not sentences:
+            return False
+
+        chunks: List[str] = []
+        cur = ""
+        for s in sentences:
+            if len(cur) + len(s) + 1 < 140:
+                cur = f"{cur} {s}".strip()
+            else:
+                if cur:
+                    chunks.append(cur)
+                cur = s
+        if cur:
+            chunks.append(cur)
+
+        audio_parts: List[bytes] = []
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        for chunk in chunks[:8]:
+            q = urllib.parse.quote(chunk)
+            url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={q}&tl=vi&client=tw-ob"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                if resp.status == 200:
+                    data = resp.read()
+                    if len(data) > 100:
+                        audio_parts.append(data)
+
+        if audio_parts:
+            out_path.write_bytes(b"".join(audio_parts))
+            return out_path.exists() and out_path.stat().st_size > 500
+    except Exception as e:
+        logger.warning(f"Google TTS fallback gặp sự cố: {e}")
+    return False
+
+
 def synthesize_voiceover(
     text: str,
     out_path: Path,
     voice: str = "vi-VN-HoaiMyNeural"
 ) -> bool:
     """
-    Tạo giọng đọc tiếng Việt Dual-Engine:
-    1. Ưu tiên edge-tts (Online Neural: HoaiMy hoặc NamMinh).
-    2. Fallback ngoại tuyến: Windows PowerShell 5.1 native System.Speech.Synthesis.
+    Tạo giọng đọc tiếng Việt Dual-Engine chuẩn:
+    1. edge-tts qua ThreadPoolExecutor (Tránh xung đột Streamlit event loop).
+       Thử giọng chính (ví dụ: vi-VN-HoaiMyNeural), nếu lỗi thử giọng phụ (vi-VN-NamMinhNeural).
+    2. Native Google Translate TTS fallback (100% chuẩn giọng Việt, 0 dependencies).
     """
     clean_text = re.sub(r'[\r\n\t]+', ' ', text).strip()
     if not clean_text:
         return False
 
-    # 1. edge-tts
-    try:
-        import edge_tts
-        async def _run_edge():
-            comm = edge_tts.Communicate(clean_text[:600], voice)
-            await comm.save(str(out_path))
-        asyncio.run(_run_edge())
-        if out_path.exists() and out_path.stat().st_size > 500:
-            logger.info("Voiceover tạo thành công qua edge-tts (%s bytes)", out_path.stat().st_size)
-            return True
-    except Exception as e:
-        logger.warning(f"edge-tts không phản hồi ({e}). Kích hoạt Windows SAPI SpeechSynthesizer...")
+    # 1. edge-tts (Primary voice)
+    if _synthesize_edge_tts(clean_text, voice, out_path):
+        logger.info("Voiceover tạo thành công qua edge-tts [%s] (%s bytes)", voice, out_path.stat().st_size)
+        return True
 
-    # 2. Windows PowerShell 5.1 native SAPI (Offline 100%)
-    try:
-        ps_bin = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-        if not os.path.isfile(ps_bin):
-            ps_bin = "powershell"
-        sapi_text = clean_text.replace("'", " ").replace('"', ' ')[:400]
-        wav_path = out_path.with_suffix(".wav")
-        ps_script = (
-            "Add-Type -AssemblyName System.Speech; "
-            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-            f"$s.SetOutputToWaveFile('{str(wav_path).replace(chr(92), '/')}'); "
-            f"$s.Speak('{sapi_text}'); "
-            "$s.Dispose()"
-        )
-        subprocess.run(
-            [ps_bin, "-NoProfile", "-NonInteractive", "-Command", ps_script],
-            capture_output=True,
-            text=True,
-            timeout=20
-        )
-        if wav_path.exists() and wav_path.stat().st_size > 500:
-            if out_path.suffix.lower() == ".wav":
-                return True
-            ffmpeg_bin = find_ffmpeg_binary()
-            subprocess.run([ffmpeg_bin, "-y", "-i", str(wav_path), "-c:a", "libmp3lame", str(out_path)], capture_output=True, timeout=10)
-            if out_path.exists() and out_path.stat().st_size > 500:
-                logger.info("Voiceover tạo thành công qua Windows SAPI (%s bytes)", out_path.stat().st_size)
-                return True
-    except Exception as e:
-        logger.warning(f"Windows SAPI fallback gặp sự cố: {e}")
+    # 1b. edge-tts (Secondary voice)
+    secondary_voice = "vi-VN-NamMinhNeural" if voice != "vi-VN-NamMinhNeural" else "vi-VN-HoaiMyNeural"
+    if _synthesize_edge_tts(clean_text, secondary_voice, out_path):
+        logger.info("Voiceover tạo thành công qua edge-tts fallback [%s] (%s bytes)", secondary_voice, out_path.stat().st_size)
+        return True
 
+    # 2. Native Google Translate TTS fallback
+    if _synthesize_google_tts(clean_text, out_path):
+        logger.info("Voiceover tạo thành công qua Google TTS fallback (%s bytes)", out_path.stat().st_size)
+        return True
+
+    logger.error("Không thể tổng hợp giọng đọc tiếng Việt qua bất kỳ engine nào.")
     return False
 
 
@@ -266,48 +329,71 @@ class SafeFallbackSynthesizer:
         temp_dir: Path,
         scene_num: int = 1
     ) -> Path:
-        """Tạo card đồ họa 720x1280 9:16 đồng nhất cho cả đơn cảnh và đa cảnh."""
+        """Tạo card đồ họa 720x1280 9:16 độ nét cao với typography Segoe UI lớn và gradient hiện đại."""
         out_p = temp_dir / f"card_{scene_num}.png"
         img = Image.new("RGB", (720, 1280), (15, 23, 42))
         draw = ImageDraw.Draw(img)
 
+        # Typography TrueType Segoe UI / Arial
+        f_brand = _get_font(26, bold=True)
+        f_badge = _get_font(28, bold=True)
+        f_headline = _get_font(38, bold=True)
+        f_meta = _get_font(24, bold=False)
+
+        # Nền ảnh hoặc gradient hiện đại
         if ref_image_path and ref_image_path.exists():
             try:
                 with Image.open(ref_image_path) as ref_img:
                     rgb = ref_img.convert("RGB")
-                    bg_blur = rgb.resize((720, 1280), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(radius=20))
+                    bg_blur = rgb.resize((720, 1280), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(radius=25))
                     img.paste(bg_blur, (0, 0))
-                    overlay = Image.new("RGBA", (720, 1280), (15, 23, 42, 175))
+                    overlay = Image.new("RGBA", (720, 1280), (15, 23, 42, 185))
                     img.paste(overlay, (0, 0), overlay)
 
-                    scale = min(620.0 / rgb.width, 500.0 / rgb.height)
+                    scale = min(620.0 / rgb.width, 460.0 / rgb.height)
                     nw, nh = int(rgb.width * scale), int(rgb.height * scale)
-                    img.paste(rgb.resize((nw, nh), Image.Resampling.LANCZOS), ((720 - nw) // 2, 220 + (500 - nh) // 2))
+                    img.paste(rgb.resize((nw, nh), Image.Resampling.LANCZOS), ((720 - nw) // 2, 210 + (460 - nh) // 2))
             except Exception:
                 pass
+        else:
+            # Subtle dark gradient
+            for y in range(1280):
+                ratio = y / 1280.0
+                r = int(15 * (1 - ratio) + 24 * ratio)
+                g = int(23 * (1 - ratio) + 24 * ratio)
+                b = int(42 * (1 - ratio) + 37 * ratio)
+                draw.line([(0, y), (720, y)], fill=(r, g, b))
 
-        draw.rectangle([(50, 70), (670, 140)], fill=(30, 41, 59), outline=color, width=3)
-        draw.text((70, 95), f"THE PULSE STUDIO — {title.upper()[:35]}", fill=color)
+        # Top Banner
+        draw.rounded_rectangle([(40, 60), (680, 140)], radius=18, fill=(30, 41, 59), outline=color, width=3)
+        draw.text((65, 82), f"THE PULSE STUDIO — {title.upper()[:30]}", font=f_brand, fill=color)
 
-        draw.rounded_rectangle([(50, 760), (670, 1080)], radius=20, fill=(24, 24, 37), outline=(51, 65, 85), width=2)
-        draw.text((80, 790), f"[{title.upper()[:30]}]", fill=color)
+        # Glassmorphic Box
+        draw.rounded_rectangle([(40, 710), (680, 1110)], radius=24, fill=(24, 24, 37), outline=(71, 85, 105), width=2)
+        draw.text((65, 735), f"[{title.upper()[:28]}]", font=f_badge, fill=color)
 
+        # Tự động ngắt dòng đo theo kích thước font thực tế
         clean = re.sub(r"\s+", " ", headline).strip()
-        words, lines, cur = clean.split(), [], []
+        words = clean.split()
+        lines: List[str] = []
+        cur_words: List[str] = []
         for w in words:
-            cur.append(w)
-            if len(" ".join(cur)) > 26:
-                lines.append(" ".join(cur))
-                cur = []
-        if cur:
-            lines.append(" ".join(cur))
+            cur_words.append(w)
+            bbox = draw.textbbox((0, 0), " ".join(cur_words), font=f_headline)
+            if (bbox[2] - bbox[0]) > 580:
+                cur_words.pop()
+                if cur_words:
+                    lines.append(" ".join(cur_words))
+                cur_words = [w]
+        if cur_words:
+            lines.append(" ".join(cur_words))
 
-        y_t = 840
-        for l in lines[:4]:
-            draw.text((80, y_t), l, fill=(255, 255, 255))
-            y_t += 45
+        y_t = 795
+        for l in lines[:5]:
+            draw.text((65, y_t), l, font=f_headline, fill=(255, 255, 255))
+            y_t += 52
 
-        draw.text((80, 1140), "#ThePulse #TikTokTrending #Investigative", fill=(148, 163, 184))
+        draw.text((65, 1160), "#ThePulse #TikTokTrending #PhanTichXuHuong", font=f_meta, fill=(148, 163, 184))
         img.save(out_p, "PNG")
         return out_p
 
@@ -617,14 +703,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if has_voice and voice_out.exists():
                 audio_inputs = [
                     "-i", str(voice_out),
-                    "-f", "lavfi", "-i", "anoisesrc=c=pink:r=44100:a=0.015,lowpass=f=200",
-                    "-f", "lavfi", "-i", "sine=f=55:r=44100"
+                    "-f", "lavfi", "-i", "anoisesrc=c=pink:r=44100:a=0.012,lowpass=f=200",
+                    "-f", "lavfi", "-i", "sine=f=50:r=44100"
                 ]
                 filter_complex = (
                     f"[0:v]subtitles='{ass_path_escaped}'[v];"
-                    "[2:a][3:a]amix=inputs=2:duration=first,volume=0.2[bgm];"
-                    "[1:a]volume=1.3[vce];"
-                    "[vce][bgm]amix=inputs=2:duration=first[a]"
+                    "[2:a][3:a]amix=inputs=2:duration=first:normalize=0,volume=0.08,lowpass=f=250[bgm];"
+                    "[1:a]volume=1.8[vce];"
+                    "[vce][bgm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]"
                 )
                 map_args = ["-map", "[v]", "-map", "[a]"]
             else:
@@ -659,9 +745,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     # Fallback bỏ subtitles nếu máy thiếu libass
                     if has_voice and voice_out.exists():
                         simple_filter = (
-                            "[2:a][3:a]amix=inputs=2:duration=first,volume=0.2[bgm];"
-                            "[1:a]volume=1.3[vce];"
-                            "[vce][bgm]amix=inputs=2:duration=first[a]"
+                            "[2:a][3:a]amix=inputs=2:duration=first:normalize=0,volume=0.08,lowpass=f=250[bgm];"
+                            "[1:a]volume=1.8[vce];"
+                            "[vce][bgm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]"
                         )
                         simple_map = ["-map", "0:v", "-map", "[a]"]
                     else:
