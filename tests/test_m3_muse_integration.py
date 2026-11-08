@@ -14,7 +14,8 @@ from src.video.muse_integration import (
     find_ffmpeg_binary,
     MuseAIClient,
     SafeFallbackSynthesizer,
-    generate_tiktok_video
+    generate_tiktok_video,
+    synthesize_voiceover
 )
 
 
@@ -113,6 +114,48 @@ def test_generate_tiktok_video_auto_mode():
     assert Path(res["video_path"]).exists()
 
 
+def test_synthesize_voiceover_edge_tts(tmp_path):
+    """Kiểm tra tổng hợp giọng đọc tiếng Việt bằng edge-tts."""
+    target_dir = Path(tmp_path) if tmp_path else Path(".")
+    out_file = target_dir / "test_voice_edge.mp3"
+    try:
+        ok = synthesize_voiceover("Thử nghiệm giọng đọc tiếng Việt Hoài My.", out_file, voice="vi-VN-HoaiMyNeural")
+        assert ok is True
+        assert out_file.exists()
+        assert out_file.stat().st_size > 1000
+    finally:
+        out_file.unlink(missing_ok=True)
+
+
+def test_synthesize_voiceover_google_fallback(tmp_path):
+    """Kiểm tra fallback sang Google Translate TTS khi edge-tts không phản hồi."""
+    target_dir = Path(tmp_path) if tmp_path else Path(".")
+    out_file = target_dir / "test_voice_fallback.mp3"
+    try:
+        with patch("src.video.muse_integration._synthesize_edge_tts", return_value=False):
+            ok = synthesize_voiceover("Thử nghiệm giọng đọc dự phòng tiếng Việt.", out_file)
+            assert ok is True
+            assert out_file.exists()
+            assert out_file.stat().st_size > 1000
+    finally:
+        out_file.unlink(missing_ok=True)
+
+
+def test_synthesize_voiceover_terminal_fallback(tmp_path):
+    """Kiểm tra terminal fallback âm thanh im lặng khi toàn bộ engine TTS lỗi mạng."""
+    target_dir = Path(tmp_path) if tmp_path else Path(".")
+    out_file = target_dir / "test_voice_silent.mp3"
+    try:
+        with patch("src.video.muse_integration._synthesize_edge_tts", return_value=False), \
+             patch("src.video.muse_integration._synthesize_google_tts", return_value=False):
+            ok = synthesize_voiceover("Thử nghiệm toàn bộ engine thất bại.", out_file)
+            assert ok is False
+            assert out_file.exists()
+            assert out_file.stat().st_size > 500
+    finally:
+        out_file.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     print("Running M3 Tests...")
     test_find_ffmpeg_binary()
@@ -129,5 +172,12 @@ if __name__ == "__main__":
     print("PASS: test_safe_fallback_synthesizer_real_render")
     test_generate_tiktok_video_auto_mode()
     print("PASS: test_generate_tiktok_video_auto_mode")
-    print("=== ALL 7 M3 TESTS PASSED PERFECTLY! ===")
+    test_synthesize_voiceover_edge_tts(None)
+    print("PASS: test_synthesize_voiceover_edge_tts")
+    test_synthesize_voiceover_google_fallback(None)
+    print("PASS: test_synthesize_voiceover_google_fallback")
+    test_synthesize_voiceover_terminal_fallback(None)
+    print("PASS: test_synthesize_voiceover_terminal_fallback")
+    print("=== ALL 10 M3 TESTS PASSED PERFECTLY! ===")
+
 

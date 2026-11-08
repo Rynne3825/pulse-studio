@@ -83,30 +83,47 @@ def _get_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def _synthesize_edge_tts(text: str, voice: str, out_path: Path) -> bool:
-    """Chạy edge-tts trong worker thread riêng để tránh xung đột event loop Streamlit."""
-    def _worker() -> None:
-        import edge_tts
+def _synthesize_edge_tts(text: str, voice: str, out_path: Path, max_retries: int = 2) -> bool:
+    """Chạy edge-tts trong worker thread riêng với asyncio loop độc lập và cơ chế retry."""
+    import edge_tts
+
+    def _worker(target_file: Path) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            comm = edge_tts.Communicate(text[:600], voice)
-            loop.run_until_complete(comm.save(str(out_path)))
+            comm = edge_tts.Communicate(text, voice)
+            loop.run_until_complete(comm.save(str(target_file)))
         finally:
-            loop.close()
+            try:
+                loop.close()
+            except Exception:
+                pass
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_worker)
-            future.result(timeout=15)
-        return out_path.exists() and out_path.stat().st_size > 500
-    except Exception as e:
-        logger.warning(f"edge-tts ({voice}) thất bại: {e}")
-        return False
+    timeout = max(30.0, len(text) * 0.1)
+
+    for attempt in range(max_retries + 1):
+        try:
+            if attempt > 0:
+                time.sleep(1.0 * attempt)
+            if out_path.exists():
+                out_path.unlink(missing_ok=True)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_worker, out_path)
+                future.result(timeout=timeout)
+
+            if out_path.exists() and out_path.stat().st_size > 1000:
+                return True
+        except Exception as e:
+            logger.warning("edge-tts (%s) lần thử %d thất bại: %s", voice, attempt + 1, e)
+            if out_path.exists():
+                out_path.unlink(missing_ok=True)
+
+    return False
 
 
 def _synthesize_google_tts(text: str, out_path: Path) -> bool:
-    """Google Translate TTS (tw-ob client) chuẩn tiếng Việt 100% không phụ thuộc 3rd party."""
+    """Google Translate TTS (tw-ob client) chuẩn tiếng Việt 100% qua requests."""
     try:
         sentences = [s.strip() for s in re.split(r'[,.!?;\n]+', text) if s.strip()]
         if not sentences:
@@ -120,62 +137,119 @@ def _synthesize_google_tts(text: str, out_path: Path) -> bool:
             else:
                 if cur:
                     chunks.append(cur)
-                cur = s
+                if len(s) >= 140:
+                    words = s.split()
+                    w_cur = ""
+                    for w in words:
+                        if len(w_cur) + len(w) + 1 < 140:
+                            w_cur = f"{w_cur} {w}".strip()
+                        else:
+                            if w_cur:
+                                chunks.append(w_cur)
+                            w_cur = w
+                    cur = w_cur
+                else:
+                    cur = s
         if cur:
             chunks.append(cur)
 
         audio_parts: List[bytes] = []
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        for chunk in chunks[:8]:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        for chunk in chunks:
             q = urllib.parse.quote(chunk)
             url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={q}&tl=vi&client=tw-ob"
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=6) as resp:
-                if resp.status == 200:
-                    data = resp.read()
-                    if len(data) > 100:
-                        audio_parts.append(data)
+            chunk_success = False
+            for retry in range(3):
+                try:
+                    resp = requests.get(url, headers=headers, timeout=10)
+                    if resp.status_code == 200 and len(resp.content) > 100:
+                        audio_parts.append(resp.content)
+                        chunk_success = True
+                        break
+                except Exception as ex:
+                    logger.warning("Google TTS chunk retry %d lỗi: %s", retry + 1, ex)
+                    time.sleep(0.5)
+            if not chunk_success:
+                return False
 
         if audio_parts:
             out_path.write_bytes(b"".join(audio_parts))
-            return out_path.exists() and out_path.stat().st_size > 500
+            return out_path.exists() and out_path.stat().st_size > 1000
     except Exception as e:
-        logger.warning(f"Google TTS fallback gặp sự cố: {e}")
+        logger.warning("Google TTS fallback gặp sự cố: %s", e)
     return False
+
+
+def _generate_silent_audio(out_path: Path, duration: float = 10.0) -> bool:
+    """Tạo audio im lặng chuẩn MP3 qua FFmpeg làm terminal fallback tránh gián đoạn pipeline."""
+    try:
+        ffmpeg_bin = find_ffmpeg_binary()
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+            "-t", str(max(1.0, duration)),
+            "-c:a", "libmp3lame", "-b:a", "128k",
+            str(out_path)
+        ]
+        proc = subprocess.run(cmd, capture_output=True, timeout=10)
+        return out_path.exists() and out_path.stat().st_size > 500
+    except Exception as e:
+        logger.warning("Không thể tạo audio im lặng fallback: %s", e)
+        return False
 
 
 def synthesize_voiceover(
     text: str,
-    out_path: Path,
-    voice: str = "vi-VN-HoaiMyNeural"
+    output_path: Optional[Union[str, Path]] = None,
+    voice: str = "vi-VN-HoaiMyNeural",
+    out_path: Optional[Union[str, Path]] = None
 ) -> bool:
     """
     Tạo giọng đọc tiếng Việt Dual-Engine chuẩn:
-    1. edge-tts qua ThreadPoolExecutor (Tránh xung đột Streamlit event loop).
+    1. edge-tts qua ThreadPoolExecutor (Tránh xung đột Streamlit event loop, retry 2 lần).
        Thử giọng chính (ví dụ: vi-VN-HoaiMyNeural), nếu lỗi thử giọng phụ (vi-VN-NamMinhNeural).
-    2. Native Google Translate TTS fallback (100% chuẩn giọng Việt, 0 dependencies).
+    2. Native Google Translate TTS fallback qua requests (100% chuẩn giọng Việt, 0 dependencies).
+    3. Terminal fallback: Graceful silence MP3 tránh crash pipeline.
     """
+    dest_path = output_path if output_path is not None else out_path
+    if dest_path is None:
+        raise ValueError("synthesize_voiceover yêu cầu chỉ định output_path hoặc out_path.")
+    target_path = Path(dest_path)
     clean_text = re.sub(r'[\r\n\t]+', ' ', text).strip()
     if not clean_text:
         return False
 
     # 1. edge-tts (Primary voice)
-    if _synthesize_edge_tts(clean_text, voice, out_path):
-        logger.info("Voiceover tạo thành công qua edge-tts [%s] (%s bytes)", voice, out_path.stat().st_size)
-        return True
+    try:
+        if _synthesize_edge_tts(clean_text, voice, target_path):
+            logger.info("Voiceover tạo thành công qua edge-tts [%s] (%s bytes)", voice, target_path.stat().st_size)
+            return True
+    except Exception as e:
+        logger.warning(f"edge-tts ({voice}) exception: {e}")
 
     # 1b. edge-tts (Secondary voice)
     secondary_voice = "vi-VN-NamMinhNeural" if voice != "vi-VN-NamMinhNeural" else "vi-VN-HoaiMyNeural"
-    if _synthesize_edge_tts(clean_text, secondary_voice, out_path):
-        logger.info("Voiceover tạo thành công qua edge-tts fallback [%s] (%s bytes)", secondary_voice, out_path.stat().st_size)
-        return True
+    try:
+        if _synthesize_edge_tts(clean_text, secondary_voice, target_path):
+            logger.info("Voiceover tạo thành công qua edge-tts fallback [%s] (%s bytes)", secondary_voice, target_path.stat().st_size)
+            return True
+    except Exception as e:
+        logger.warning(f"edge-tts ({secondary_voice}) exception: {e}")
 
     # 2. Native Google Translate TTS fallback
-    if _synthesize_google_tts(clean_text, out_path):
-        logger.info("Voiceover tạo thành công qua Google TTS fallback (%s bytes)", out_path.stat().st_size)
-        return True
+    try:
+        if _synthesize_google_tts(clean_text, target_path):
+            logger.info("Voiceover tạo thành công qua Google TTS fallback (%s bytes)", target_path.stat().st_size)
+            return True
+    except Exception as e:
+        logger.warning(f"Google TTS fallback exception: {e}")
 
-    logger.error("Không thể tổng hợp giọng đọc tiếng Việt qua bất kỳ engine nào.")
+    # 3. Terminal fallback: Graceful silence MP3 generator
+    logger.error("Không thể tổng hợp giọng đọc tiếng Việt qua edge-tts và Google TTS. Kích hoạt terminal fallback im lặng.")
+    est_duration = max(3.0, len(clean_text.split()) / 3.0)
+    _generate_silent_audio(target_path, duration=est_duration)
     return False
 
 
@@ -430,8 +504,12 @@ class SafeFallbackSynthesizer:
         hook = str(script_data.get("hook", "")).strip() or "SỰ THẬT CHẤN ĐỘNG CẦN BÓC MẼ!"
         body = str(script_data.get("body", "")).strip() or "Cụ thể vấn đề đang diễn biến phức tạp..."
         cta = str(script_data.get("cta", "")).strip() or "Bạn nghĩ sao về điều này? Hãy để lại ý kiến!"
-        t_hook_end = min(3.0, total_duration * 0.3)
-        t_body_end = max(t_hook_end + 1.0, total_duration - 2.5)
+        t_hook_end = min(3.0, max(0.2, total_duration * 0.33))
+        t_body_end = min(total_duration * 0.75, max(t_hook_end + 0.1, total_duration - 2.5))
+        if t_body_end <= t_hook_end:
+            t_body_end = t_hook_end + max(0.1, (total_duration - t_hook_end) * 0.5)
+        if t_body_end >= total_duration:
+            t_body_end = max(t_hook_end + 0.05, total_duration - 0.05)
 
         # ponytail: reuse _generate_multiscene_ass for DRY subtitle generation
         return self._generate_multiscene_ass([
@@ -472,9 +550,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
         events = []
         for start_t, end_t, style_name, text in scene_timings:
+            st = max(0.0, float(start_t))
+            et = max(st + 0.05, float(end_t))
             clean = text.replace("\n", " ").strip()
             events.append(
-                f"Dialogue: 0,{fmt_time(start_t)},{fmt_time(end_t)},{style_name},,0,0,0,,{clean}"
+                f"Dialogue: 0,{fmt_time(st)},{fmt_time(et)},{style_name},,0,0,0,,{clean}"
             )
 
         with open(ass_path, "w", encoding="utf-8") as f:
@@ -699,7 +779,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             ass_path = self._generate_multiscene_ass(scene_timings, tmp_dir)
             ass_path_escaped = str(ass_path).replace("\\", "/").replace(":", "\\:")
 
-            # 2.6 Mux hoàn tất: Video + Subtitles + Voiceover + Ambient Drone BGM Ducking
+            # 2.6 Mux hoàn tất: Video + Subtitles + Voiceover + Dynamic Ducking BGM
             if has_voice and voice_out.exists():
                 audio_inputs = [
                     "-i", str(voice_out),
@@ -708,9 +788,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 ]
                 filter_complex = (
                     f"[0:v]subtitles='{ass_path_escaped}'[v];"
-                    "[2:a][3:a]amix=inputs=2:duration=first:normalize=0,volume=0.08,lowpass=f=250[bgm];"
-                    "[1:a]volume=1.8[vce];"
-                    "[vce][bgm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]"
+                    "[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=1.5[vce_raw];"
+                    "[vce_raw]asplit=2[vce_main][vce_sc];"
+                    "[vce_main]apad[vce_pad];"
+                    "[2:a][3:a]amix=inputs=2:duration=first,volume=0.35,aformat=sample_rates=44100:channel_layouts=stereo[bgm_raw];"
+                    "[bgm_raw][vce_sc]sidechaincompress=threshold=0.08:ratio=4:attack=20:release=250[ducked_bgm];"
+                    "[vce_pad][ducked_bgm]amix=inputs=2:duration=first:dropout_transition=0:weights=1 1[a]"
                 )
                 map_args = ["-map", "[v]", "-map", "[a]"]
             else:
@@ -721,7 +804,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 ]
                 filter_complex = (
                     f"[0:v]subtitles='{ass_path_escaped}'[v];"
-                    "[1:a][2:a]amix=inputs=2:duration=first,volume=0.35[a]"
+                    "[1:a][2:a]amix=inputs=2:duration=first:dropout_transition=0:weights=1 1,volume=0.35,aformat=sample_rates=44100:channel_layouts=stereo[a]"
                 )
                 map_args = ["-map", "[v]", "-map", "[a]"]
 
@@ -745,13 +828,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     # Fallback bỏ subtitles nếu máy thiếu libass
                     if has_voice and voice_out.exists():
                         simple_filter = (
-                            "[2:a][3:a]amix=inputs=2:duration=first:normalize=0,volume=0.08,lowpass=f=250[bgm];"
-                            "[1:a]volume=1.8[vce];"
-                            "[vce][bgm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]"
+                            "[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=1.5[vce_raw];"
+                            "[vce_raw]asplit=2[vce_main][vce_sc];"
+                            "[vce_main]apad[vce_pad];"
+                            "[2:a][3:a]amix=inputs=2:duration=first,volume=0.35,aformat=sample_rates=44100:channel_layouts=stereo[bgm_raw];"
+                            "[bgm_raw][vce_sc]sidechaincompress=threshold=0.08:ratio=4:attack=20:release=250[ducked_bgm];"
+                            "[vce_pad][ducked_bgm]amix=inputs=2:duration=first:dropout_transition=0:weights=1 1[a]"
                         )
                         simple_map = ["-map", "0:v", "-map", "[a]"]
                     else:
-                        simple_filter = "[1:a][2:a]amix=inputs=2:duration=first,volume=0.35[a]"
+                        simple_filter = (
+                            "[1:a][2:a]amix=inputs=2:duration=first:dropout_transition=0:weights=1 1,volume=0.35,aformat=sample_rates=44100:channel_layouts=stereo[a]"
+                        )
                         simple_map = ["-map", "0:v", "-map", "[a]"]
 
                     cmd_no_sub = [
