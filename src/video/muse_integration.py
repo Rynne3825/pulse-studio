@@ -653,7 +653,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             concat_list = tmp_dir / "concat_list.txt"
             with open(concat_list, "w", encoding="utf-8") as f:
                 for cp in clip_paths:
-                    f.write(f"file '{cp.name}'\n")
+                    f.write(f"file '{cp.resolve().as_posix()}'\n")
 
             video_merged = tmp_dir / "video_merged.mp4"
             cmd_concat = [
