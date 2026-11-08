@@ -11,7 +11,7 @@ import json
 import socket
 import logging
 import urllib.parse
-from typing import Dict, Any, List, Optional, Tuple, TypedDict
+from typing import Dict, List, Optional, Tuple, TypedDict, Union
 import requests
 from dotenv import load_dotenv
 
@@ -23,8 +23,25 @@ logger = logging.getLogger("ai.generator")
 _CACHED_ROUTER_BASE_URL: Optional[str] = None
 
 
+class SceneItem(TypedDict, total=False):
+    scene_num: int
+    title: str
+    duration_sec: int
+    voice_text: str
+    visual_prompt: str
+    camera_motion: str
+
+
+class CinematographyLocks(TypedDict, total=False):
+    style_lock: str
+    char_lock: str
+    set_lock: str
+    video_suffix: str
+    negative_prompt: str
+
+
 class TikTokScriptOutput(TypedDict, total=False):
-    """Đặc tả kiểu dữ liệu trả về theo Contract 2 (PROJECT.md)."""
+    """Đặc tả kiểu dữ liệu trả về theo Contract 2 (PROJECT.md) kèm Storyboard đa phân cảnh."""
     hook: str
     body: str
     cta: str
@@ -34,6 +51,8 @@ class TikTokScriptOutput(TypedDict, total=False):
     muse_visual_prompt: str
     engine_used: str
     model_name: str
+    scenes: List[SceneItem]
+    cinematography_locks: CinematographyLocks
 
 
 # ==============================================================================
@@ -74,7 +93,7 @@ TIKTOK_SYSTEM_PROMPT = """Bạn là Giám đốc Sáng tạo & Chuyên gia Biên
 Nhiệm vụ: Chuyển thể tin tức được cung cấp thành kịch bản video TikTok 4 phân cảnh kịch tính, lôi cuốn, giữ chân người xem đến giây cuối cùng.
 
 QUY TẮC CẤU TRÚC 4 PHÂN CẢNH BẮT BUỘC:
-1. Scene 1 - Hook (3 giây đầu):
+1. Scene 1 - Hook (3-4 giây đầu):
    - Độ dài: DƯỚI 15 TỪ (lý tưởng từ 9 đến 14 từ).
    - Yêu cầu: Kết thúc bằng dấu hỏi '?' và bắt buộc chứa ít nhất 1 từ khóa gây tò mò/giật gân: 'sự thật', 'bóc mẽ', 'chấn động', 'cực sốc', 'lừa đảo', 'cảnh báo', 'bí mật', 'bất ngờ'.
 2. Scene 2 - Body (Bóc tách sự thật):
@@ -86,21 +105,62 @@ QUY TẮC CẤU TRÚC 4 PHÂN CẢNH BẮT BUỘC:
 4. Scene 4 - Hashtags:
    - Danh sách từ 4 đến 6 hashtag liên quan (#bocme, #review, #trending, #tiktoknews, và tag chủ đề).
 
-YÊU CẦU CHO muse_visual_prompt:
-- Viết hoàn toàn bằng TIẾNG ANH (English).
+YÊU CẦU CHO CINEMATOGRAPHY & MUSE AI:
+- Viết visual_prompt hoàn toàn bằng TIẾNG ANH (English).
 - Bắt buộc chỉ định khung hình dọc 9:16 phục vụ mô hình tạo video Muse AI.
 - Chứa cụm từ: 'Vertical 9:16 aspect ratio video, dramatic cinematic lighting, investigative realism, moody atmosphere, photorealistic 4K, cinematic slow dolly push-in'.
-- Mô tả chi tiết nhân vật chính, hành động và bối cảnh sự việc kịch tính dựa trên nội dung tin tức.
+- Phân tách rõ 4 phân cảnh trong mảng 'scenes' kèm camera motion: 'slow dolly push-in', 'pan left to right', 'slow tilt down', 'center focal hold'.
+- Khóa chặt thuộc tính điện ảnh trong 'cinematography_locks' (style_lock, char_lock, set_lock, video_suffix, negative_prompt).
 
-QUY TẮC ĐỊNH DẠNG ĐẦU RA BẮT BUỘC:
-Chỉ xuất DUY NHẤT một khối JSON hợp lệ theo đúng schema sau (KHÔNG bọc code fence, KHÔNG có văn bản giải thích thừa):
+QUY TẮC ĐỊNH DẠNG ĐẦU RA BẮT BUỘC (DUY NHẤT 1 KHỐI JSON HỢP LỆ, KHÔNG CODE FENCE):
 {
   "hook": "Câu thoại mở đầu giật gân kết thúc bằng dấu hỏi?",
   "body": "Nội dung bóc tách sự thật từ 60 đến 85 từ...",
   "cta": "Câu kêu gọi tranh luận kết thúc bằng dấu hỏi?",
   "hashtags": ["#bocme", "#review", "#trending", "#tiktoknews"],
   "full_script": "Toàn bộ kịch bản ghép từ Hook, Body, CTA và Hashtags",
-  "muse_visual_prompt": "Vertical 9:16 aspect ratio video, dramatic cinematic lighting, investigative realism, moody atmosphere, photorealistic 4K, cinematic slow dolly push-in..."
+  "muse_visual_prompt": "Vertical 9:16 aspect ratio video, dramatic cinematic lighting, investigative realism, moody atmosphere, photorealistic 4K, cinematic slow dolly push-in...",
+  "scenes": [
+    {
+      "scene_num": 1,
+      "title": "Scene 1 - Hook Giật Gân",
+      "duration_sec": 4,
+      "voice_text": "Câu thoại mở đầu giật gân kết thúc bằng dấu hỏi?",
+      "visual_prompt": "Vertical 9:16 aspect ratio video, close-up dramatic cinematic lighting, investigative tension, photorealistic 4K",
+      "camera_motion": "slow dolly push-in"
+    },
+    {
+      "scene_num": 2,
+      "title": "Scene 2 - Bóc Tách Sự Thật",
+      "duration_sec": 6,
+      "voice_text": "Chi tiết bóc tách diễn biến sự việc...",
+      "visual_prompt": "Vertical 9:16 aspect ratio video, medium documentary shot, revealing facts, realistic lighting, 4K",
+      "camera_motion": "pan left to right"
+    },
+    {
+      "scene_num": 3,
+      "title": "Scene 3 - Bằng Chứng & Hệ Quả",
+      "duration_sec": 5,
+      "voice_text": "Bằng chứng số liệu và hậu quả thực tế...",
+      "visual_prompt": "Vertical 9:16 aspect ratio video, analytical evidence tension, sharp focus, moody ambiance, 4K",
+      "camera_motion": "slow tilt down"
+    },
+    {
+      "scene_num": 4,
+      "title": "Scene 4 - Kêu Gọi Tranh Luận",
+      "duration_sec": 5,
+      "voice_text": "Câu kêu gọi tranh luận kết thúc bằng dấu hỏi?",
+      "visual_prompt": "Vertical 9:16 aspect ratio video, dramatic conclusion focal hold, high impact lighting, 4K",
+      "camera_motion": "center focal hold"
+    }
+  ],
+  "cinematography_locks": {
+    "style_lock": "Vertical 9:16 aspect ratio, dramatic cinematic lighting, investigative realism, moody atmosphere, photorealistic 4K, anamorphic color grade",
+    "char_lock": "Central subject identified from news report",
+    "set_lock": "Contextual realistic investigative environment",
+    "video_suffix": "Smooth motion, 25fps, high quality cinematic render, no watermark, no text distortion",
+    "negative_prompt": "distorted face, blurry, low resolution, multiple heads, deformed limbs, floating artifacts, static motionless"
+  }
 }"""
 
 
@@ -207,7 +267,7 @@ def resolve_model_candidates(engine: str, base_url: str = "") -> List[str]:
 # ==============================================================================
 # 4. BỘ PHÂN TÍCH JSON 7 TẦNG TỰ PHỤC HỒI (SELF-HEALING JSON PARSER)
 # ==============================================================================
-def _clean_str_field(val: Any) -> str:
+def _clean_str_field(val: object) -> str:
     """Làm sạch ký tự escape thừa trong chuỗi văn bản."""
     if not val:
         return ""
@@ -222,7 +282,7 @@ def _clean_str_field(val: Any) -> str:
     return text.strip()
 
 
-def _apply_safe_defaults(result: Dict[str, Any], title: str = "", summary: str = "") -> Dict[str, Any]:
+def _apply_safe_defaults(result: Dict[str, object], title: str = "", summary: str = "") -> Dict[str, object]:
     """Điền giá trị mặc định an toàn cho các trường rỗng đảm bảo bất biến Contract 2."""
     clean_title = title.strip()[:50] if title else ""
     clean_summary = summary.strip()[:140] if summary else ""
@@ -260,10 +320,77 @@ def _apply_safe_defaults(result: Dict[str, Any], title: str = "", summary: str =
     if not result.get("full_script"):
         result["full_script"] = f"{result['hook']}\n\n{result['body']}\n\n{result['cta']}\n\n{' '.join(result['hashtags'])}"
 
+    # 5. Phân cảnh đa hồi (Multi-Scene Storyboard)
+    raw_scenes = result.get("scenes")
+    if not isinstance(raw_scenes, list) or len(raw_scenes) < 4:
+        body_words = result["body"].split()
+        mid = max(10, len(body_words) // 2)
+        body_p1 = " ".join(body_words[:mid])
+        body_p2 = " ".join(body_words[mid:]) if len(body_words) > mid else "Các bằng chứng số liệu tiếp tục được cơ quan chức năng làm rõ."
+
+        result["scenes"] = [
+            {
+                "scene_num": 1,
+                "title": "Scene 1 - Hook Giật Gân",
+                "duration_sec": 4,
+                "voice_text": result["hook"],
+                "visual_prompt": f"Vertical 9:16 aspect ratio video, close-up dramatic cinematic lighting, investigative tension regarding {clean_title or 'hot news'}, photorealistic 4K, slow dolly push-in",
+                "camera_motion": "slow dolly push-in"
+            },
+            {
+                "scene_num": 2,
+                "title": "Scene 2 - Bóc Tách Sự Thật",
+                "duration_sec": 6,
+                "voice_text": body_p1,
+                "visual_prompt": f"Vertical 9:16 aspect ratio video, medium documentary shot, uncovering core mechanism of {clean_title or 'event'}, cinematic shadows, 4K, slow pan left to right",
+                "camera_motion": "pan left to right"
+            },
+            {
+                "scene_num": 3,
+                "title": "Scene 3 - Bằng Chứng & Hệ Quả",
+                "duration_sec": 5,
+                "voice_text": body_p2,
+                "visual_prompt": f"Vertical 9:16 aspect ratio video, analytical evidence tension, sharp focus on documents and key subjects, moody ambiance, 4K, slow tilt down",
+                "camera_motion": "slow tilt down"
+            },
+            {
+                "scene_num": 4,
+                "title": "Scene 4 - Kêu Gọi Tranh Luận",
+                "duration_sec": 5,
+                "voice_text": result["cta"],
+                "visual_prompt": f"Vertical 9:16 aspect ratio video, dramatic conclusion focal hold, high impact lighting, 4K photorealistic, center focal hold",
+                "camera_motion": "center focal hold"
+            }
+        ]
+    else:
+        normalized_scenes = []
+        for i, sc in enumerate(raw_scenes[:4], 1):
+            if isinstance(sc, dict):
+                normalized_scenes.append({
+                    "scene_num": sc.get("scene_num") or i,
+                    "title": sc.get("title") or f"Scene {i}",
+                    "duration_sec": int(sc.get("duration_sec") or (4 if i == 1 else (6 if i == 2 else 5))),
+                    "voice_text": str(sc.get("voice_text") or (result["hook"] if i == 1 else (result["cta"] if i == 4 else result["body"][:80]))).strip(),
+                    "visual_prompt": str(sc.get("visual_prompt") or result["muse_visual_prompt"]).strip(),
+                    "camera_motion": str(sc.get("camera_motion") or "slow dolly push-in").strip()
+                })
+        result["scenes"] = normalized_scenes
+
+    # 6. Cinematography Locks
+    raw_locks = result.get("cinematography_locks")
+    if not isinstance(raw_locks, dict) or not raw_locks.get("style_lock"):
+        result["cinematography_locks"] = {
+            "style_lock": "Vertical 9:16 aspect ratio, dramatic cinematic lighting, investigative realism, moody atmosphere, photorealistic 4K, anamorphic color grade",
+            "char_lock": f"Central subject related to {clean_title or 'investigative news'}",
+            "set_lock": "Contextual realistic investigative environment with high fidelity textures",
+            "video_suffix": "Smooth motion, 25fps, high quality cinematic render, no watermark, no text distortion",
+            "negative_prompt": "distorted face, blurry, low resolution, multiple heads, deformed limbs, floating artifacts, static motionless"
+        }
+
     return result
 
 
-def self_healing_json_parser(raw_text: str, default_title: str = "", default_summary: str = "") -> Dict[str, Any]:
+def self_healing_json_parser(raw_text: str, default_title: str = "", default_summary: str = "") -> Dict[str, object]:
     """
     Bộ phân tích JSON 7 tầng tự phục hồi:
     - Tầng 1: Loại bỏ Markdown Code Fences (```json, ```)
@@ -274,7 +401,7 @@ def self_healing_json_parser(raw_text: str, default_title: str = "", default_sum
     - Tầng 6: Regex Field Extractor bóc tách từng trường (chống unescaped internal quotes và text format)
     - Tầng 7: Safe Fallback Synthesizer đảm bảo không bao giờ sập pipeline và đủ Contract 2.
     """
-    result: Dict[str, Any] = {
+    result: Dict[str, object] = {
         "hook": "",
         "body": "",
         "cta": "",
@@ -283,7 +410,7 @@ def self_healing_json_parser(raw_text: str, default_title: str = "", default_sum
         "muse_visual_prompt": ""
     }
 
-    parsed: Optional[Dict[str, Any]] = None
+    parsed: Optional[Dict[str, object]] = None
     if isinstance(raw_text, dict):
         parsed = raw_text
         text = ""
@@ -356,6 +483,10 @@ def self_healing_json_parser(raw_text: str, default_title: str = "", default_sum
             parsed.get("muse_visual_prompt") or parsed.get("visual_prompt", "")
         )
         result["full_script"] = _clean_str_field(parsed.get("full_script", ""))
+        if "scenes" in parsed and isinstance(parsed["scenes"], list):
+            result["scenes"] = parsed["scenes"]
+        if "cinematography_locks" in parsed and isinstance(parsed["cinematography_locks"], dict):
+            result["cinematography_locks"] = parsed["cinematography_locks"]
     else:
         # Regex Fallback bóc tách từng trường
         hook_m = re.search(r'"hook"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
@@ -423,7 +554,7 @@ parse_script_json = self_healing_json_parser
 # ==============================================================================
 # 5. SAFE SCRIPT FALLBACK (TẤT ĐỊNH KHI OFFLINE)
 # ==============================================================================
-def safe_script_fallback(title: str, summary: str, engine: str = "gemini") -> Dict[str, Any]:
+def safe_script_fallback(title: str, summary: str, engine: str = "gemini") -> Dict[str, object]:
     """Cơ chế sinh kịch bản dự phòng tất định khi toàn bộ kết nối AI gateway bị ngắt."""
     clean_title = title.strip()[:60] if title else "Tin nóng mới nhất"
     clean_summary = summary.strip()[:140] if summary else "Diễn biến sự việc đang thu hút sự chú ý đặc biệt."
@@ -441,6 +572,48 @@ def safe_script_fallback(title: str, summary: str, engine: str = "gemini") -> Di
         f"breaking news scene regarding {clean_title}, 4K photorealistic resolution."
     )
 
+    scenes = [
+        {
+            "scene_num": 1,
+            "title": "Scene 1 - Hook Giật Gân",
+            "duration_sec": 4,
+            "voice_text": hook,
+            "visual_prompt": f"Vertical 9:16 aspect ratio video, close-up dramatic cinematic lighting, investigative tension regarding {clean_title}, photorealistic 4K, slow dolly push-in",
+            "camera_motion": "slow dolly push-in"
+        },
+        {
+            "scene_num": 2,
+            "title": "Scene 2 - Bóc Tách Sự Thật",
+            "duration_sec": 6,
+            "voice_text": body[:120],
+            "visual_prompt": f"Vertical 9:16 aspect ratio video, medium documentary shot, revealing facts behind {clean_title}, cinematic shadows, 4K, slow pan left to right",
+            "camera_motion": "pan left to right"
+        },
+        {
+            "scene_num": 3,
+            "title": "Scene 3 - Bằng Chứng & Hệ Quả",
+            "duration_sec": 5,
+            "voice_text": body[120:] if len(body) > 120 else "Nhiều tình tiết bất thường tiếp tục được cơ quan chức năng làm sáng tỏ.",
+            "visual_prompt": f"Vertical 9:16 aspect ratio video, analytical evidence tension, sharp focus on documents, moody ambiance, 4K, slow tilt down",
+            "camera_motion": "slow tilt down"
+        },
+        {
+            "scene_num": 4,
+            "title": "Scene 4 - Kêu Gọi Tranh Luận",
+            "duration_sec": 5,
+            "voice_text": cta,
+            "visual_prompt": f"Vertical 9:16 aspect ratio video, dramatic conclusion focal hold, high impact lighting, 4K photorealistic, center focal hold",
+            "camera_motion": "center focal hold"
+        }
+    ]
+    locks = {
+        "style_lock": "Vertical 9:16 aspect ratio, dramatic cinematic lighting, investigative realism, moody atmosphere, photorealistic 4K, anamorphic color grade",
+        "char_lock": f"Central subject related to {clean_title}",
+        "set_lock": "Contextual realistic investigative environment with high fidelity textures",
+        "video_suffix": "Smooth motion, 25fps, high quality cinematic render, no watermark, no text distortion",
+        "negative_prompt": "distorted face, blurry, low resolution, multiple heads, deformed limbs, floating artifacts, static motionless"
+    }
+
     return {
         "hook": hook,
         "body": body,
@@ -449,6 +622,8 @@ def safe_script_fallback(title: str, summary: str, engine: str = "gemini") -> Di
         "hashtags": hashtags,
         "full_script": full_script,
         "muse_visual_prompt": prompt,
+        "scenes": scenes,
+        "cinematography_locks": locks,
         "engine_used": f"{engine} (offline_fallback)",
         "model_name": "deterministic-fallback"
     }
@@ -526,7 +701,7 @@ def generate_tiktok_script(
     summary: str,
     engine: str = "gemini",
     safe_fallback: bool = False
-) -> Dict[str, Any]:
+) -> Dict[str, object]:
     """
     Biên tập kịch bản TikTok 4 phân cảnh định dạng Review/Bóc Mẽ tuân thủ Contract 2.
     Hỗ trợ chuyển đổi Dual-Engine: 'gemini' (Gemini 3.8 Flash) hoặc 'muse' (Muse AI Chat).
@@ -621,6 +796,8 @@ def generate_tiktok_script(
         "hashtags": hashtags,
         "full_script": full_script,
         "muse_visual_prompt": prompt,
+        "scenes": parsed.get("scenes", []),
+        "cinematography_locks": parsed.get("cinematography_locks", {}),
         "engine_used": actual_engine,
         "model_name": used_model
     }

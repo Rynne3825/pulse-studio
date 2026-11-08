@@ -9,7 +9,7 @@ THE PULSE EDITORIAL - THE ATELIER (CỘT TRÁI: PRODUCTION STUDIO & XU HƯỚNG 
 
 import html
 import streamlit as st
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Tuple, Optional
 from pathlib import Path
 
 from src.scraper.rss_scraper import fetch_trending_news
@@ -19,7 +19,7 @@ from src.video.muse_integration import generate_tiktok_video
 from app.components.editorial_utils import is_safe_url, render_clean_html
 
 
-def render_editorial_atelier() -> Tuple[str, Optional[Dict[str, Any]], str, Dict[str, Any]]:
+def render_editorial_atelier() -> Tuple[str, Optional[Dict[str, object]], str, Dict[str, object]]:
     """
     Render giao diện Xưởng Sản Xuất (Atelier) bên trái.
     Trả về: (content, selected_article_dict, topic_key, script_data)
@@ -187,25 +187,53 @@ def render_editorial_atelier() -> Tuple[str, Optional[Dict[str, Any]], str, Dict
             with st.expander("🎨 Xem Visual Prompt tiếng Anh tối ưu riêng cho Muse AI (9:16)", expanded=False):
                 st.code(muse_prompt, language="text")
 
+        # Hiển thị Storyboard 4 Phân Cảnh & Cinematography Locks
+        scenes_list = current_script.get("scenes", [])
+        if scenes_list:
+            with st.expander("🎬 Storyboard 4 Phân Cảnh & Khóa Thuộc Tính Điện Ảnh (Cinematography Locks)", expanded=True):
+                cols_s = st.columns(4)
+                for s_idx, sc in enumerate(scenes_list[:4]):
+                    with cols_s[s_idx]:
+                        st.markdown(f"**{sc.get('title', f'Phân cảnh {s_idx+1}')}**")
+                        st.caption(f"⏱ {sc.get('duration_sec', 5)}s · 🎥 `{sc.get('camera_motion', 'slow dolly push-in')}`")
+                        st.info(sc.get('voice_text', ''))
+                locks = current_script.get("cinematography_locks", {})
+                if locks:
+                    st.caption(f"🔒 **Style:** {locks.get('style_lock', '')[:90]}... | **Negative:** {locks.get('negative_prompt', '')[:60]}...")
+
     # === PHẦN 3: TẠO SINH VIDEO TIKTOK 9:16 (MUSE AI VIDEO STUDIO) ===
     with st.container(border=True):
         render_clean_html(
             """
-            <div class="editorial-panel-title">3. Xưởng Tạo Sinh Video TikTok 9:16 (Muse AI Studio)</div>
-            <div class="editorial-panel-subtitle">Tạo video dọc TikTok chân thực với ảnh nhân vật thật & phụ đề động</div>
+            <div class="editorial-panel-title">3. Xưởng Dựng Video TikTok Studio (Muse AI & Multi-Scene Engine)</div>
+            <div class="editorial-panel-subtitle">Tạo video dọc TikTok 15s–25s 4 phân cảnh với giọng đọc AI, âm hưởng BGM và phụ đề động</div>
             """
         )
 
-        col_v_btn, col_v_mode = st.columns([7, 5])
-        with col_v_btn:
-            render_video_clicked = st.button("🎬 Tạo Video TikTok (Muse AI)", key="btn_render_video", use_container_width=True)
-        with col_v_mode:
+        col_dur, col_voice, col_mode = st.columns([4, 4, 4])
+        with col_dur:
+            v_dur = st.selectbox(
+                "Thời lượng video:",
+                options=[20, 15, 25],
+                format_func=lambda x: f"{x}s (Chuẩn 4 phân cảnh)" if x == 20 else f"{x}s",
+                key="video_duration_select"
+            )
+        with col_voice:
+            v_voice = st.selectbox(
+                "Giọng đọc AI (TTS):",
+                options=["vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"],
+                format_func=lambda x: "🎙 Nữ miền Bắc (Hoài My)" if "HoaiMy" in x else "🎙 Nam miền Bắc (Nam Minh)",
+                key="video_voice_select"
+            )
+        with col_mode:
             v_mode = st.selectbox(
                 "Chế độ tạo video:",
                 options=["auto", "fallback", "muse_api"],
-                format_func=lambda x: "Tự động thích ứng (Khuyên dùng)" if x == "auto" else ("Safe Fallback (Ngoại tuyến/Demo)" if x == "fallback" else "Muse AI API Thật"),
+                format_func=lambda x: "Tự động thích ứng (Khuyên dùng)" if x == "auto" else ("Studio Montage (Offline Demo)" if x == "fallback" else "Muse AI API Thật"),
                 key="video_render_mode_select"
             )
+
+        render_video_clicked = st.button("🎬 Dựng Video TikTok Studio (4 Phân Cảnh)", key="btn_render_video", use_container_width=True)
 
         if render_video_clicked:
             if not content.strip():
@@ -215,14 +243,15 @@ def render_editorial_atelier() -> Tuple[str, Optional[Dict[str, Any]], str, Dict
                 if selected_article:
                     ref_img_url = selected_article.get("thumbnail") or selected_article.get("thumbnail_url")
 
-                with st.spinner("Đang tạo sinh video TikTok dọc 9:16 (kết hợp chuyển động, âm thanh và phụ đề)..."):
+                with st.spinner(f"Đang dựng video TikTok 4 phân cảnh ({v_dur}s) kết hợp giọng đọc AI, BGM và phụ đề động..."):
                     try:
                         v_res = generate_tiktok_video(
                             visual_prompt=muse_prompt or content[:150],
                             reference_image_url=ref_img_url,
                             script_data=current_script or {"hook": content[:40], "body": content, "cta": "Xem thêm!"},
                             mode=v_mode,
-                            duration=5
+                            duration=v_dur,
+                            voice=v_voice
                         )
                         st.session_state.generated_video_result = v_res
                         st.toast("Đã xuất bản video TikTok 9:16 thành công!", icon="🎬")
