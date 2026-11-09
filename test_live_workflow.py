@@ -1,5 +1,8 @@
-import json
+import os
 import sys
+import json
+import shutil
+import subprocess
 from pathlib import Path
 
 # Ensure project root is on sys.path
@@ -8,7 +11,7 @@ sys.path.insert(0, ".")
 from src.scraper.rss_scraper import fetch_trending_news
 from src.ai.generator import generate_tiktok_script
 from src.models.content_evaluator import evaluate_tiktok_script
-from src.video.muse_integration import generate_tiktok_video
+from src.video.muse_integration import generate_tiktok_video, find_ffmpeg_binary
 
 print("=== BƯỚC 1: CÀO TIN TỨC NÓNG THỰC TẾ ===")
 articles = fetch_trending_news("CongNghe", limit=5)
@@ -67,10 +70,7 @@ print(json.dumps(video_res, indent=2, ensure_ascii=False))
 video_file = Path(video_res["video_path"])
 if video_file.exists():
     print(f"\n=== BƯỚC 5: TRÍCH XUẤT 4 KHUNG HÌNH PHÂN CẢNH ĐỂ ĐÁNH GIÁ THỊ GIÁC ===")
-    import subprocess
-    import shutil
-    artifact_dir = Path(r"C:\Users\Rynne\.gemini\antigravity\brain\e0e8d16e-233e-4cba-b992-59812b7f024c")
-    from src.video.muse_integration import find_ffmpeg_binary
+    artifact_dir = Path(os.getenv("ARTIFACT_DIR", r"C:\Users\Rynne\.gemini\antigravity\brain\e0e8d16e-233e-4cba-b992-59812b7f024c"))
     ffmpeg_bin = find_ffmpeg_binary()
     
     scene_sample_times = [

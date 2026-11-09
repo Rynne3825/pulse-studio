@@ -563,6 +563,17 @@ class MuseAIClient:
         }
 
 
+def strip_emojis(text: str) -> str:
+    """Loại bỏ triệt để các ký tự emoji unicode gây lỗi font [?] trên Windows TTF."""
+    if not text:
+        return ""
+    emoji_pattern = re.compile(
+        r"[\U00010000-\U0010ffff\u2600-\u26ff\u2700-\u27bf\ufe0f]",
+        flags=re.UNICODE
+    )
+    return emoji_pattern.sub("", text).strip()
+
+
 class SafeFallbackSynthesizer:
     """
     Bộ máy dựng video TikTok 9:16 Studio-Grade:
@@ -602,8 +613,8 @@ class SafeFallbackSynthesizer:
         out_p = Path(temp_dir) / f"card_{scene_num}.png"
         theme_key = theme.lower().strip() if isinstance(theme, str) else "editorial"
         theme_cfg = THEME_PRESETS.get(theme_key, THEME_PRESETS["editorial"])
-        safe_title = str(title or "").strip()
-        safe_headline = str(headline or "").strip()
+        safe_title = strip_emojis(str(title or "").strip())
+        safe_headline = strip_emojis(str(headline or "").strip())
 
         img = Image.new("RGB", (720, 1280), theme_cfg["bg_gradient_start"])
         draw = ImageDraw.Draw(img)
@@ -674,12 +685,17 @@ class SafeFallbackSynthesizer:
                     draw.rounded_rectangle([(stage_x + 15, stage_y + 15), (stage_x + 185, stage_y + 55)], radius=10, fill=(239, 68, 68), outline=(255, 255, 255), width=1)
                     draw.text((stage_x + 28, stage_y + 22), "HOT | TIÊU ĐIỂM", font=f_label, fill=(255, 255, 255))
                 elif scene_num == 2:
-                    # Phân cảnh 2: Investigative Zoom 1.7x (Cận cảnh góc trái điều tra)
-                    zoom = 1.7
-                    crop_w = max(40, int(rw / zoom))
-                    crop_h = max(40, int(rh / zoom))
+                    # Phân cảnh 2: Investigative Zoom 1.7x (Cận cảnh góc trái điều tra, khóa tỉ lệ 640:520)
+                    target_ratio = stage_w / stage_h
+                    base_w = rw / 1.7
+                    base_h = base_w / target_ratio
+                    if base_h > rh / 1.7:
+                        base_h = rh / 1.7
+                        base_w = base_h * target_ratio
+
+                    crop_w, crop_h = max(40, int(base_w)), max(40, int(base_h))
                     crop_x = 0
-                    crop_y = int(rh * 0.1)
+                    crop_y = int(max(0, rh - crop_h) * 0.1)
                     cropped_region = ref_img_rgb.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
                     stage_crop = cropped_region.resize((stage_w, stage_h), Image.Resampling.LANCZOS)
                     img.paste(stage_crop, (stage_x, stage_y))
@@ -690,12 +706,17 @@ class SafeFallbackSynthesizer:
                     draw.rounded_rectangle([(stage_x + 15, stage_y + 15), (stage_x + 250, stage_y + 55)], radius=10, fill=(59, 130, 246), outline=(255, 255, 255), width=1)
                     draw.text((stage_x + 28, stage_y + 22), "PHÂN TÍCH | CHI TIẾT", font=f_label, fill=(255, 255, 255))
                 elif scene_num == 3:
-                    # Phân cảnh 3: Evidence Zoom 1.7x (Cận cảnh góc phải dữ liệu)
-                    zoom = 1.7
-                    crop_w = max(40, int(rw / zoom))
-                    crop_h = max(40, int(rh / zoom))
+                    # Phân cảnh 3: Evidence Zoom 1.7x (Cận cảnh góc phải dữ liệu, khóa tỉ lệ 640:520)
+                    target_ratio = stage_w / stage_h
+                    base_w = rw / 1.7
+                    base_h = base_w / target_ratio
+                    if base_h > rh / 1.7:
+                        base_h = rh / 1.7
+                        base_w = base_h * target_ratio
+
+                    crop_w, crop_h = max(40, int(base_w)), max(40, int(base_h))
                     crop_x = max(0, rw - crop_w)
-                    crop_y = int(rh * 0.15)
+                    crop_y = int(max(0, rh - crop_h) * 0.15)
                     cropped_region = ref_img_rgb.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
                     stage_crop = cropped_region.resize((stage_w, stage_h), Image.Resampling.LANCZOS)
                     img.paste(stage_crop, (stage_x, stage_y))
@@ -876,10 +897,10 @@ PlayResY: 1280
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: HookStyle,Arial,38,&H0000FFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,130,1
-Style: BodyStyle,Arial,34,&H00FFFFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,130,1
-Style: EvidStyle,Arial,34,&H00E0E0FF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,130,1
-Style: CTAStyle,Arial,36,&H0000E5FF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,130,1
+Style: HookStyle,Arial,38,&H0000FFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,150,1
+Style: BodyStyle,Arial,34,&H00FFFFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,150,1
+Style: EvidStyle,Arial,34,&H00E0E0FF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,150,1
+Style: CTAStyle,Arial,36,&H0000E5FF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,150,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

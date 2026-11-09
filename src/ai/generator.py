@@ -388,7 +388,10 @@ def _build_viral_body(clean_title: str = "", clean_summary: str = "") -> str:
     if len(words) > 80:
         words = words[:78]
 
-    return " ".join(words)
+    body_text = " ".join(words).rstrip(",;:- ")
+    if not body_text.endswith((".", "!", "?")):
+        body_text += "."
+    return body_text
 
 
 def _build_viral_cta(clean_title: str = "") -> str:
@@ -444,7 +447,7 @@ def _format_visual_prompt_from_detail(detail: ImagePromptDetail) -> str:
 def _apply_safe_defaults(result: Dict[str, object], title: str = "", summary: str = "") -> Dict[str, object]:
     """Điền giá trị mặc định an toàn cho các trường rỗng đảm bảo bất biến Contract 2 và cấu trúc viral 3 phần."""
     clean_title = str(title or "").strip()[:60]
-    clean_summary = str(summary or "").strip()[:140]
+    clean_summary = str(summary or "").strip()[:600]
 
     if not result.get("hook"):
         result["hook"] = _build_viral_hook(clean_title)
@@ -469,10 +472,17 @@ def _apply_safe_defaults(result: Dict[str, object], title: str = "", summary: st
 
     # 5. Phân cảnh đa hồi (Multi-Scene Storyboard)
     body_str = str(result["body"])
-    body_words = body_str.split()
-    mid = max(10, len(body_words) // 2)
-    body_p1 = " ".join(body_words[:mid])
-    body_p2 = " ".join(body_words[mid:]) if len(body_words) > mid else "Các bằng chứng số liệu tiếp tục được cơ quan chức năng làm rõ."
+    # Ưu tiên tách theo dấu chấm câu để không làm chẻ đôi câu giữa chừng
+    body_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", body_str) if s.strip()]
+    if len(body_sentences) >= 2:
+        mid_idx = max(1, len(body_sentences) // 2)
+        body_p1 = " ".join(body_sentences[:mid_idx])
+        body_p2 = " ".join(body_sentences[mid_idx:])
+    else:
+        body_words = body_str.split()
+        mid = max(10, len(body_words) // 2)
+        body_p1 = " ".join(body_words[:mid])
+        body_p2 = " ".join(body_words[mid:]) if len(body_words) > mid else "Các bằng chứng số liệu tiếp tục được cơ quan chức năng làm rõ."
 
     raw_scenes = result.get("scenes")
     if not isinstance(raw_scenes, list) or len(raw_scenes) < 4:
