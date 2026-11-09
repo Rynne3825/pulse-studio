@@ -17,6 +17,7 @@ ENV/
 # Generated Media
 data/output_videos/*
 !data/output_videos/.gitkeep
+frame_scene*.jpg
 
 # Distribution / packaging
 build/

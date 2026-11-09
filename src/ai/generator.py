@@ -348,22 +348,46 @@ def _build_viral_hook(clean_title: str = "") -> str:
 
 
 def _build_viral_body(clean_title: str = "", clean_summary: str = "") -> str:
-    """Sinh thân kịch bản Retain (4-15s, 60-85 từ trải qua Scene 2 & 3)."""
+    """Sinh thân kịch bản Retain (4-15s, 60-85 từ trải qua Scene 2 & 3), bám sát nội dung bài báo gốc."""
     clean_t = (clean_title or "").strip()
     clean_s = (clean_summary or "").strip()
-    lead = f"Theo thông tin điều tra mới nhất về {clean_t or 'vụ việc'}, {clean_s or 'cơ quan chức năng đã làm rõ nhiều tình tiết bất ngờ'}."
-    expansion = (
-        "Thủ đoạn tinh vi được các đối tượng thực hiện bài bản nhằm đánh lừa sự chú ý của dư luận và chiếm đoạt lợi ích. "
-        "Các bằng chứng thực tế cùng tài liệu xác thực cho thấy hậu quả nghiêm trọng và mức độ ảnh hưởng diện rộng. "
-        "Cộng đồng mạng cần nâng cao tinh thần cảnh giác, kiểm tra kỹ lưỡng mọi nguồn tin để tránh rơi vào bẫy."
-    )
-    full_text = f"{lead} {expansion}"
-    words = full_text.split()
+
+    # Tách các câu thực tế từ tóm tắt bài báo để giữ tính xác thực
+    raw_sentences = [
+        s.strip() for s in re.split(r"[.\n]+", clean_s)
+        if len(s.strip().split()) >= 4
+    ]
+
+    parts: List[str] = []
+    if clean_t:
+        parts.append(f"Theo thông tin cập nhật mới nhất về {clean_t}.")
+
+    if raw_sentences:
+        # Sử dụng trực tiếp dữ liệu và sự kiện từ bài viết gốc
+        parts.append(" ".join(raw_sentences[:2]) + ".")
+    else:
+        parts.append("Diễn biến thực tế đang thu hút sự chú ý đặc biệt từ dư luận và giới chuyên môn.")
+
+    # Kho phân tích dữ liệu chuyên sâu, trung tính, phù hợp mọi chủ đề tin tức
+    analysis_pool = [
+        "Các phân tích dữ liệu cho thấy những tác động đa chiều và nhiều hệ quả mang tính bước ngoặt đối với toàn bộ lĩnh vực.",
+        "Thông tin xác thực từ các nguồn tin cậy chỉ ra những chi tiết quan trọng cần được đánh giá khách quan và thận trọng.",
+        "Giới chuyên gia nhận định đây là bài toán then chốt đòi hỏi sự cân bằng chiến lược và các giải pháp đồng bộ.",
+        "Mọi động thái tiếp theo được dự báo sẽ ảnh hưởng trực tiếp đến thị trường và cộng đồng trong thời gian tới."
+    ]
+
+    for sentence in analysis_pool:
+        current_len = len(" ".join(parts).split())
+        if current_len >= 68:
+            break
+        parts.append(sentence)
+
+    words = " ".join(parts).split()
     if len(words) < 65:
-        filler = "Đây là hồi chuông cảnh báo rõ ràng cho tất cả chúng ta trước những chiêu trò ngày càng liều lĩnh và nguy hiểm."
-        words.extend(filler.split())
-    if len(words) > 82:
-        words = words[:80]
+        words.extend("Đây là bước ngoặt đáng chú ý cần được theo dõi sát sao.".split())
+    if len(words) > 80:
+        words = words[:78]
+
     return " ".join(words)
 
 

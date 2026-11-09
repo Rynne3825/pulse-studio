@@ -598,7 +598,7 @@ class SafeFallbackSynthesizer:
         scene_num: int = 1,
         theme: str = "editorial"
     ) -> Path:
-        """Tạo card đồ họa 720x1280 9:16 độ nét cao theo preset theme màu sắc và typography TrueType."""
+        """Tạo card đồ họa 720x1280 9:16 độ nét cao: phân tách tuyệt đối vùng hiển thị, ảnh động hóa theo phân cảnh, chống đè chữ."""
         out_p = Path(temp_dir) / f"card_{scene_num}.png"
         theme_key = theme.lower().strip() if isinstance(theme, str) else "editorial"
         theme_cfg = THEME_PRESETS.get(theme_key, THEME_PRESETS["editorial"])
@@ -610,33 +610,33 @@ class SafeFallbackSynthesizer:
 
         # Typography TrueType theo theme font stack
         font_fam = theme_cfg.get("font_family", "segoeui")
-        f_brand = _get_font(26, bold=True, font_family=font_fam)
-        f_badge = _get_font(28, bold=True, font_family=font_fam)
-        f_headline = _get_font(38, bold=True, font_family=font_fam)
-        f_meta = _get_font(24, bold=False, font_family=font_fam)
+        f_brand = _get_font(25, bold=True, font_family=font_fam)
+        f_badge = _get_font(24, bold=True, font_family=font_fam)
+        f_headline = _get_font(34, bold=True, font_family=font_fam)
+        f_meta = _get_font(22, bold=False, font_family=font_fam)
+        f_label = _get_font(18, bold=True, font_family=font_fam)
 
         # Màu nhấn: ưu tiên color do caller chỉ định nếu khác None
         accent_color = color if color is not None else theme_cfg["title_color"]
 
-        # Nền ảnh hoặc gradient hiện đại theo theme
+        # 1. NỀN TOÀN CẢNH (Ambient Background)
         ref_p = Path(ref_image_path) if ref_image_path else None
-        if ref_p and ref_p.exists():
+        has_ref = bool(ref_p and ref_p.exists())
+        ref_img_rgb = None
+        if has_ref:
             try:
                 with Image.open(ref_p) as ref_img:
-                    rgb = ref_img.convert("RGB")
-                    bg_blur = rgb.resize((720, 1280), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(radius=25))
+                    ref_img_rgb = ref_img.convert("RGB")
+                    bg_blur = ref_img_rgb.resize((720, 1280), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(radius=30))
                     img.paste(bg_blur, (0, 0))
-                    # Overlay với màu chủ đạo của theme
                     tint_r, tint_g, tint_b = theme_cfg["bg_gradient_start"]
-                    overlay = Image.new("RGBA", (720, 1280), (tint_r, tint_g, tint_b, 185))
+                    overlay = Image.new("RGBA", (720, 1280), (tint_r, tint_g, tint_b, 195))
                     img.paste(overlay, (0, 0), overlay)
-
-                    scale = min(620.0 / rgb.width, 460.0 / rgb.height)
-                    nw, nh = int(rgb.width * scale), int(rgb.height * scale)
-                    img.paste(rgb.resize((nw, nh), Image.Resampling.LANCZOS), ((720 - nw) // 2, 210 + (460 - nh) // 2))
             except Exception:
-                pass
-        else:
+                ref_img_rgb = None
+                has_ref = False
+
+        if not has_ref:
             # Gradient dọc mượt mà theo bảng màu của theme
             c_start = theme_cfg["bg_gradient_start"]
             c_end = theme_cfg["bg_gradient_end"]
@@ -647,48 +647,159 @@ class SafeFallbackSynthesizer:
                 b = int(c_start[2] * (1 - ratio) + c_end[2] * ratio)
                 draw.line([(0, y), (720, y)], fill=(r, g, b))
 
-        # Khung viền ngoài tinh tế (Card Accent Border)
+        # Khung viền ngoài tổng thể (Outer Card Accent Border)
         card_border_color = theme_cfg.get("card_border", accent_color)
         draw.rounded_rectangle([(16, 16), (704, 1264)], radius=20, outline=card_border_color, width=2)
 
-        # Top Banner
-        draw.rounded_rectangle([(40, 60), (680, 140)], radius=18, fill=theme_cfg["banner_bg"], outline=accent_color, width=3)
-        draw.text((65, 82), f"THE PULSE STUDIO — {safe_title.upper()[:30]}", font=f_brand, fill=accent_color)
+        # 2. KHUNG TIÊU ĐỀ TOP (Top Brand Banner: Y = 50..130)
+        draw.rounded_rectangle([(40, 50), (680, 130)], radius=16, fill=theme_cfg["banner_bg"], outline=accent_color, width=2)
+        draw.text((65, 75), f"THE PULSE STUDIO — {safe_title.upper()[:28]}", font=f_brand, fill=accent_color)
 
-        # Glassmorphic Box
-        draw.rounded_rectangle([(40, 710), (680, 1110)], radius=24, fill=theme_cfg["panel_bg"], outline=theme_cfg["panel_border"], width=2)
-        draw.text((65, 735), f"[{safe_title.upper()[:28]}]", font=f_badge, fill=accent_color)
+        # 3. SÂN KHẤU THỊ GIÁC ĐA DẠNG HÓA THEO PHÂN CẢNH (Visual Stage: Y = 145..665, 640x520)
+        stage_w, stage_h = 640, 520
+        stage_x, stage_y = 40, 145
 
-        # Tự động ngắt dòng đo theo kích thước font thực tế
-        clean = re.sub(r"\s+", " ", safe_headline).strip()
-        words = clean.split()
-        lines: List[str] = []
-        cur_words: List[str] = []
-        for w in words:
-            cur_words.append(w)
-            bbox = draw.textbbox((0, 0), " ".join(cur_words), font=f_headline)
+        if ref_img_rgb:
+            try:
+                rw, rh = ref_img_rgb.width, ref_img_rgb.height
+                if scene_num == 1:
+                    # Phân cảnh 1: Hero Centered Shot (Toàn cảnh nổi bật)
+                    scale = max(stage_w / rw, stage_h / rh)
+                    nw, nh = int(rw * scale), int(rh * scale)
+                    resized = ref_img_rgb.resize((nw, nh), Image.Resampling.LANCZOS)
+                    cx, cy = (nw - stage_w) // 2, (nh - stage_h) // 2
+                    stage_crop = resized.crop((cx, cy, cx + stage_w, cy + stage_h))
+                    img.paste(stage_crop, (stage_x, stage_y))
+                    # Badge góc ảnh
+                    draw.rounded_rectangle([(stage_x + 15, stage_y + 15), (stage_x + 185, stage_y + 55)], radius=10, fill=(239, 68, 68), outline=(255, 255, 255), width=1)
+                    draw.text((stage_x + 28, stage_y + 22), "HOT | TIÊU ĐIỂM", font=f_label, fill=(255, 255, 255))
+                elif scene_num == 2:
+                    # Phân cảnh 2: Investigative Zoom 1.7x (Cận cảnh góc trái điều tra)
+                    zoom = 1.7
+                    crop_w = max(40, int(rw / zoom))
+                    crop_h = max(40, int(rh / zoom))
+                    crop_x = 0
+                    crop_y = int(rh * 0.1)
+                    cropped_region = ref_img_rgb.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
+                    stage_crop = cropped_region.resize((stage_w, stage_h), Image.Resampling.LANCZOS)
+                    img.paste(stage_crop, (stage_x, stage_y))
+                    # Scanlines nhẹ thể hiện phân tích
+                    for sy in range(stage_y + 60, stage_y + stage_h - 20, 50):
+                        draw.line([(stage_x, sy), (stage_x + stage_w, sy)], fill=(59, 130, 246, 75), width=1)
+                    # Badge phân tích
+                    draw.rounded_rectangle([(stage_x + 15, stage_y + 15), (stage_x + 250, stage_y + 55)], radius=10, fill=(59, 130, 246), outline=(255, 255, 255), width=1)
+                    draw.text((stage_x + 28, stage_y + 22), "PHÂN TÍCH | CHI TIẾT", font=f_label, fill=(255, 255, 255))
+                elif scene_num == 3:
+                    # Phân cảnh 3: Evidence Zoom 1.7x (Cận cảnh góc phải dữ liệu)
+                    zoom = 1.7
+                    crop_w = max(40, int(rw / zoom))
+                    crop_h = max(40, int(rh / zoom))
+                    crop_x = max(0, rw - crop_w)
+                    crop_y = int(rh * 0.15)
+                    cropped_region = ref_img_rgb.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
+                    stage_crop = cropped_region.resize((stage_w, stage_h), Image.Resampling.LANCZOS)
+                    img.paste(stage_crop, (stage_x, stage_y))
+                    # Badge bằng chứng
+                    draw.rounded_rectangle([(stage_x + 15, stage_y + 15), (stage_x + 250, stage_y + 55)], radius=10, fill=(168, 85, 247), outline=(255, 255, 255), width=1)
+                    draw.text((stage_x + 28, stage_y + 22), "KIỂM CHỨNG | DỮ LIỆU", font=f_label, fill=(255, 255, 255))
+                else:
+                    # Phân cảnh 4: Community Engagement Hub (Card tranh luận tương tác)
+                    blur_stage = ref_img_rgb.resize((stage_w, stage_h), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(14))
+                    img.paste(blur_stage, (stage_x, stage_y))
+                    # Hộp đối thoại cộng đồng
+                    draw.rounded_rectangle([(stage_x + 25, stage_y + 25), (stage_x + stage_w - 25, stage_y + stage_h - 25)], radius=18, fill=(15, 23, 42), outline=(245, 158, 11), width=2)
+                    draw.text((stage_x + 45, stage_y + 50), "Ý KIẾN CỦA BẠN LÀ GÌ?", font=_get_font(28, bold=True, font_family=font_fam), fill=(245, 158, 11))
+                    draw.text((stage_x + 45, stage_y + 95), "Tham gia tranh luận ngay cùng cộng đồng:", font=_get_font(20, bold=False, font_family=font_fam), fill=(226, 232, 240))
+                    # Các chỉ số tương tác xã hội chuẩn typographic
+                    social_pills = [
+                        ("[ THÍCH ] 48.2K Người đồng tình quan điểm", (239, 68, 68)),
+                        ("[ BÌNH LUẬN ] 3.8K Lượt thảo luận", (59, 130, 246)),
+                        ("[ CHIA SẺ ] 12.5K Lượt chia sẻ phân tích", (34, 197, 94))
+                    ]
+                    sy_pill = stage_y + 140
+                    for p_txt, p_col in social_pills:
+                        draw.rounded_rectangle([(stage_x + 45, sy_pill), (stage_x + stage_w - 45, sy_pill + 40)], radius=10, fill=(30, 41, 59), outline=p_col, width=1)
+                        draw.text((stage_x + 65, sy_pill + 9), p_txt, font=f_label, fill=(255, 255, 255))
+                        sy_pill += 50
+                    # Nút bấm hành động
+                    draw.rounded_rectangle([(stage_x + 45, stage_y + 390), (stage_x + stage_w - 45, stage_y + 440)], radius=12, fill=(245, 158, 11), outline=(255, 255, 255), width=1)
+                    draw.text((stage_x + 65, stage_y + 404), ">> BÌNH LUẬN NGAY DƯỚI VIDEO <<", font=_get_font(18, bold=True, font_family=font_fam), fill=(15, 23, 42))
+            except Exception:
+                pass
+        else:
+            # Procedural Graphics cho trường hợp không có ảnh nguồn
+            draw.rounded_rectangle([(stage_x, stage_y), (stage_x + stage_w, stage_y + stage_h)], radius=16, fill=(15, 23, 42), outline=accent_color, width=2)
+            if scene_num == 1:
+                draw.text((stage_x + 30, stage_y + 35), "HOT | TIÊU ĐIỂM XU HƯỚNG MẠNG", font=f_badge, fill=accent_color)
+                for r in (50, 90, 130, 170):
+                    draw.ellipse([(stage_x + stage_w//2 - r, stage_y + 260 - r), (stage_x + stage_w//2 + r, stage_y + 260 + r)], outline=accent_color, width=2)
+            elif scene_num == 2:
+                draw.text((stage_x + 30, stage_y + 35), "PHÂN TÍCH | BÓC TÁCH DỮ LIỆU", font=f_badge, fill=accent_color)
+                bar_heights = [120, 200, 260, 170, 230]
+                for bi, bh in enumerate(bar_heights):
+                    bx = stage_x + 80 + bi * 100
+                    draw.rounded_rectangle([(bx, stage_y + 400 - bh), (bx + 55, stage_y + 400)], radius=6, fill=accent_color)
+            elif scene_num == 3:
+                draw.text((stage_x + 30, stage_y + 35), "KIỂM CHỨNG | DỮ LIỆU THỰC TẾ", font=f_badge, fill=accent_color)
+                for line_i in range(5):
+                    ly = stage_y + 110 + line_i * 65
+                    draw.line([(stage_x + 60, ly), (stage_x + stage_w - 60, ly)], fill=(71, 85, 105), width=2)
+            else:
+                draw.text((stage_x + 30, stage_y + 35), "TRANH LUẬN | Ý KIẾN CỘNG ĐỒNG", font=f_badge, fill=accent_color)
+                draw.rounded_rectangle([(stage_x + 50, stage_y + 150), (stage_x + stage_w - 50, stage_y + 350)], radius=16, fill=(30, 41, 59), outline=(245, 158, 11), width=2)
+                draw.text((stage_x + 80, stage_y + 220), "BẠN ĐỒNG Ý HAY PHẢN ĐỐI?", font=_get_font(26, bold=True, font_family=font_fam), fill=(245, 158, 11))
+
+        # Viền khung bảo vệ Visual Stage
+        draw.rounded_rectangle([(stage_x, stage_y), (stage_x + stage_w, stage_y + stage_h)], radius=16, outline=accent_color, width=2)
+
+        # 4. KHUNG TỔNG KẾT / ĐIỂM NHẤN (Highlight Panel: Y = 680..885 - Tối đa 2 dòng, TUYỆT ĐỐI KHÔNG TRÀN XUỐNG)
+        draw.rounded_rectangle([(40, 680), (680, 885)], radius=18, fill=theme_cfg["panel_bg"], outline=theme_cfg["panel_border"], width=2)
+        draw.text((65, 698), f"[{safe_title.upper()[:28]}]", font=f_badge, fill=accent_color)
+
+        clean_hl = re.sub(r"\s+", " ", safe_headline).strip()
+        words_hl = clean_hl.split()
+        if len(words_hl) > 13:
+            short_hl = " ".join(words_hl[:13]) + "..."
+        else:
+            short_hl = clean_hl
+
+        # Gói tối đa 2 dòng cho khung điểm nhấn
+        hl_lines: List[str] = []
+        cur_w: List[str] = []
+        for w in short_hl.split():
+            cur_w.append(w)
+            bbox = draw.textbbox((0, 0), " ".join(cur_w), font=f_headline)
             if (bbox[2] - bbox[0]) > 580:
-                cur_words.pop()
-                if cur_words:
-                    lines.append(" ".join(cur_words))
-                cur_words = [w]
-        if cur_words:
-            lines.append(" ".join(cur_words))
+                cur_w.pop()
+                if cur_w:
+                    hl_lines.append(" ".join(cur_w))
+                cur_w = [w]
+        if cur_w:
+            hl_lines.append(" ".join(cur_w))
 
-        y_t = 795
-        for l in lines[:5]:
-            draw.text((65, y_t), l, font=f_headline, fill=theme_cfg["headline_color"])
-            y_t += 52
+        y_hl = 745
+        for l in hl_lines[:2]:
+            draw.text((65, y_hl), l, font=f_headline, fill=theme_cfg["headline_color"])
+            y_hl += 46
 
-        # Metadata tags
+        # 5. KHAY PHỤ ĐỀ TRỰC TIẾP CHUYÊN DỤNG (Dedicated Subtitle Tray: Y = 920..1150)
+        # Nơi FFmpeg hiển thị ASS subtitles (Alignment: 2, MarginV: 150). PIL KHÔNG vẽ chữ lên khay này!
+        draw.rounded_rectangle([(40, 920), (680, 1150)], radius=20, fill=(15, 23, 42), outline=(255, 255, 255), width=1)
+        # Nhãn khay phụ đề và hiệu ứng sóng âm thanh
+        draw.text((65, 932), "PHỤ ĐỀ TRỰC TIẾP", font=f_label, fill=(148, 163, 184))
+        for wave_i, wave_h in enumerate([8, 16, 22, 14, 18, 10]):
+            wx = 610 + wave_i * 8
+            draw.line([(wx, 946 - wave_h // 2), (wx, 946 + wave_h // 2)], fill=accent_color, width=2)
+
+        # 6. METADATA VÀ TIẾN TRÌNH (Footer: Y = 1175..1215)
         tags_text = theme_cfg.get("tags", "#ThePulse #TikTokTrending #PhanTichXuHuong")
-        draw.text((65, 1160), tags_text, font=f_meta, fill=theme_cfg["meta_color"])
+        draw.text((65, 1180), tags_text, font=f_meta, fill=theme_cfg["meta_color"])
 
         # Chỉ báo phân cảnh (Scene Progress Pips)
         for dot_i in range(1, 5):
             dot_x = 550 + (dot_i - 1) * 28
             dot_color = accent_color if dot_i == scene_num else theme_cfg["meta_color"]
-            draw.ellipse([(dot_x, 1168), (dot_x + 12, 1180)], fill=dot_color)
+            draw.ellipse([(dot_x, 1188), (dot_x + 12, 1200)], fill=dot_color)
 
         img.save(out_p, "PNG")
         return out_p
@@ -738,7 +849,7 @@ class SafeFallbackSynthesizer:
 
         # ponytail: reuse _generate_multiscene_ass for DRY subtitle generation
         return self._generate_multiscene_ass([
-            (0.0, t_hook_end, "HookStyle", r"{\an5\b1}" + hook.upper()),
+            (0.0, t_hook_end, "HookStyle", r"{\an2\b1}" + hook.upper()),
             (t_hook_end, t_body_end, "BodyStyle", r"{\an2}" + body),
             (t_body_end, total_duration, "CTAStyle", r"{\an2\b1}" + cta)
         ], temp_dir)
@@ -748,7 +859,7 @@ class SafeFallbackSynthesizer:
         scene_timings: List[Tuple[float, float, str, str]],
         temp_dir: Path
     ) -> Path:
-        """Tạo file phụ đề ASS đồng bộ chính xác với 4 phân cảnh."""
+        """Tạo file phụ đề ASS đồng bộ chính xác với 4 phân cảnh, căn chỉnh khay phụ đề chuyên dụng (Alignment: 2, MarginV: 150)."""
         ass_path = temp_dir / "multiscene_captions.ass"
 
         def fmt_time(sec: float) -> str:
@@ -765,10 +876,10 @@ PlayResY: 1280
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: HookStyle,Arial,48,&H0000FFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,2,5,40,40,220,1
-Style: BodyStyle,Arial,38,&H00FFFFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,250,1
-Style: EvidStyle,Arial,38,&H00E0E0FF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,250,1
-Style: CTAStyle,Arial,42,&H0000E5FF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,2,2,40,40,250,1
+Style: HookStyle,Arial,38,&H0000FFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,130,1
+Style: BodyStyle,Arial,34,&H00FFFFFF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,130,1
+Style: EvidStyle,Arial,34,&H00E0E0FF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,130,1
+Style: CTAStyle,Arial,36,&H0000E5FF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,60,60,130,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -942,7 +1053,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             current_time = 0.0
 
             style_names = [
-                r"{\an5\b1}",
+                r"{\an2\b1}",
                 r"{\an2}",
                 r"{\an2}",
                 r"{\an2\b1}"
@@ -955,13 +1066,32 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 sc_text = sc.get("voice_text") or ""
                 sc_dur = scene_durs[i]
 
-                # Lưu timing cho phụ đề
-                scene_timings.append((
-                    current_time,
-                    current_time + sc_dur,
-                    style_keys[i],
-                    f"{style_names[i]}{sc_text}"
-                ))
+                # Lưu timing cho phụ đề (Tự động chia nhỏ cue phụ đề nhịp nhanh TikTok nếu văn bản dài)
+                words_sc = sc_text.split()
+                if sc_dur >= 4.0 and len(words_sc) > 13:
+                    mid = len(words_sc) // 2
+                    c1 = " ".join(words_sc[:mid])
+                    c2 = " ".join(words_sc[mid:])
+                    dur1 = round(sc_dur / 2.0, 2)
+                    scene_timings.append((
+                        current_time,
+                        current_time + dur1,
+                        style_keys[i],
+                        f"{style_names[i]}{c1}"
+                    ))
+                    scene_timings.append((
+                        current_time + dur1,
+                        current_time + sc_dur,
+                        style_keys[i],
+                        f"{style_names[i]}{c2}"
+                    ))
+                else:
+                    scene_timings.append((
+                        current_time,
+                        current_time + sc_dur,
+                        style_keys[i],
+                        f"{style_names[i]}{sc_text}"
+                    ))
                 current_time += sc_dur
 
                 card_path = self._generate_scene_card(
