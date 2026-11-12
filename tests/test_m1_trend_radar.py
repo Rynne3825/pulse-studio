@@ -1,4 +1,4 @@
-"""
+r"""
 Bộ kiểm thử tự động Milestone M1: Trend Radar & High-Res Scraper.
 Kiểm thử chi tiết các ca biên (edge cases) và xác nhận Contract 1.
 Chạy bằng: D:\pulse-studio\.venv\Scripts\python.exe -m unittest tests/test_m1_trend_radar.py
@@ -14,14 +14,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.scraper.rss_scraper import (
+from src.rss.scraper import (
     clean_html_text,
     get_high_res_image_url,
     extract_thumbnail_url,
     fetch_trending_news,
     RSS_CONFIG
 )
-from src.preprocessing.trend_extractor import (
+from src.nlp.trends import (
     extract_trending_topics,
     VIETNAMESE_STOPWORDS
 )

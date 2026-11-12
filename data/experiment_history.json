@@ -1,0 +1,38 @@
+[
+  {
+    "timestamp": "2026-11-12 12:20:15",
+    "topic": "CongNghe",
+    "article_title": "Trí tuệ nhân tạo tạo sinh bùng nổ tại Việt Nam: 78% doanh ng",
+    "platform": "facebook",
+    "score_v1": 96.9,
+    "score_v2": 100.0,
+    "delta": 3.1
+  },
+  {
+    "timestamp": "2026-11-12 12:27:14",
+    "topic": "CongNghe",
+    "article_title": "Người dùng iPhone nhận cảnh báo khẩn từ Binance: Không cần j",
+    "platform": "facebook",
+    "score_v1": 85.8,
+    "score_v2": 90.8,
+    "delta": 5.0
+  },
+  {
+    "timestamp": "2026-11-12 12:27:39",
+    "topic": "CongNghe",
+    "article_title": "Người dùng iPhone nhận cảnh báo khẩn từ Binance: Không cần j",
+    "platform": "facebook",
+    "score_v1": 85.8,
+    "score_v2": 94.7,
+    "delta": 8.9
+  },
+  {
+    "timestamp": "2026-11-12 12:29:32",
+    "topic": "CongNghe",
+    "article_title": "Người dùng iPhone nhận cảnh báo khẩn từ Binance: Không cần j",
+    "platform": "facebook",
+    "score_v1": 94.9,
+    "score_v2": 97.7,
+    "delta": 2.8
+  }
+]

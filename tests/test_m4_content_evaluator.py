@@ -1,109 +1,88 @@
-"""
-Bộ kiểm thử tự động cho Milestone M4: Tầng Đánh Giá & Tối Ưu Nội Dung (Viral Content Evaluator).
-"""
+"""Tests for PostViralEvaluator (platform-adaptive Facebook / Threads scoring)."""
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.models.content_evaluator import (
-    TikTokViralEvaluator,
-    evaluate_tiktok_script
-)
+from src.eval.scorer import PostViralEvaluator, evaluate_post
+
+SOURCE = "Giá vàng trong nước tăng mạnh phiên sáng nay, nhà đầu tư chú ý biến động giá vàng"
 
 
-def test_hook_score_empty():
-    evaluator = TikTokViralEvaluator()
-    res = evaluator.calculate_hook_score("")
-    assert res["score"] == 0.0
+def _words(n: int) -> str:
+    return " ".join(["từ"] * n)
 
 
-def test_hook_score_strong():
-    evaluator = TikTokViralEvaluator()
-    # Có từ khóa 'sự thật', có dấu hỏi '?', dưới 15 từ
-    res = evaluator.calculate_hook_score("Sự thật chấn động về iPhone 16 bạn đã biết chưa?")
+def test_hook_empty():
+    assert PostViralEvaluator().calculate_hook_score("")["score"] == 0.0
+
+
+def test_hook_strong():
+    res = PostViralEvaluator().calculate_hook_score("Sự thật chấn động về iPhone 16 bạn đã biết chưa?")
     assert res["score"] >= 90.0
-    assert "sự thật" in res["matched_keywords"]
     assert res["word_count"] <= 15
 
 
-def test_hook_score_long_penalty():
-    evaluator = TikTokViralEvaluator()
-    long_hook = "Đây là một câu mở đầu rất dài dòng và không có điểm nhấn gián tiếp khiến cho người xem cảm thấy vô cùng buồn ngủ và muốn lướt qua ngay lập tức"
-    res = evaluator.calculate_hook_score(long_hook)
-    assert res["word_count"] > 15
-    assert res["score"] < 70.0
+def test_cta_empty_and_strong():
+    ev = PostViralEvaluator()
+    assert ev.calculate_cta_score("")["score"] == 20.0
+    strong = ev.calculate_cta_score("Bạn nghĩ sao? Hãy để lại bình luận nhé!")
+    assert strong["score"] >= 80.0
+    assert strong["matched_keywords"]
 
 
-def test_trend_similarity_aligned():
-    evaluator = TikTokViralEvaluator()
-    source = "Apple ra mắt iPhone 16 với tính năng camera nút bấm mới và chip A18 Pro nâng cấp mạnh mẽ."
-    script = "iPhone 16 vừa ra mắt với chip A18 Pro và nút bấm camera mới nhưng có đáng mua không?"
-    res = evaluator.calculate_trend_similarity(source, script)
-    assert res["score"] >= 50.0
-    assert 0.0 <= res["cosine_raw"] <= 1.0
+def test_cosine_similarity_relevant_vs_irrelevant():
+    ev = PostViralEvaluator()
+    rel = ev.calculate_trend_similarity(SOURCE, "Giá vàng tăng mạnh, nhà đầu tư theo dõi biến động giá vàng")
+    irr = ev.calculate_trend_similarity(SOURCE, "Công thức nấu phở bò truyền thống ngon tuyệt")
+    assert rel["score"] > irr["score"]
+    assert 0.0 <= rel["cosine_raw"] <= 1.0
 
 
-def test_pacing_score_optimal():
-    evaluator = TikTokViralEvaluator()
-    script = " ".join(["từ"] * 75)
-    res = evaluator.calculate_pacing_score(script)
-    assert res["score"] == 100.0
-    assert res["word_count"] == 75
+def test_pacing_platform_adaptive():
+    ev = PostViralEvaluator()
+    text = _words(60)
+    threads = ev.calculate_pacing_score(text, platform="threads")["score"]
+    facebook = ev.calculate_pacing_score(text, platform="facebook")["score"]
+    assert threads == 100.0
+    assert facebook < threads
+
+    long_text = _words(75) + "\n" + _words(75)
+    assert ev.calculate_pacing_score(long_text, platform="facebook")["score"] == 100.0
+    assert ev.calculate_pacing_score(long_text, platform="threads")["score"] < 70.0
+    assert ev.calculate_pacing_score("", platform="facebook")["score"] == 0.0
 
 
-def test_pacing_score_too_short():
-    evaluator = TikTokViralEvaluator()
-    script = "Quá ngắn ngủi chỉ vài ba từ."
-    res = evaluator.calculate_pacing_score(script)
-    assert res["score"] < 50.0
-
-
-def test_cta_score_strong():
-    evaluator = TikTokViralEvaluator()
-    res = evaluator.calculate_cta_score("Bạn nghĩ sao về điều này? Hãy để lại bình luận bên dưới nhé!")
-    assert res["score"] >= 90.0
-    assert len(res["matched_keywords"]) > 0
-
-
-def test_evaluate_full_script():
-    source_news = "Bộ Y tế cảnh báo nhiều vụ ngộ độc thực phẩm do vi khuẩn Clostridium botulinum trong thực phẩm đóng hộp."
-    script_data = {
-        "hook": "Cảnh báo khẩn cấp về ngộ độc thực phẩm botulinum nguy hiểm chết người!",
-        "body": "Bộ Y tế vừa phát hiện nhiều ca ngộ độc nặng do sử dụng đồ hộp kém chất lượng. Độc tố này có thể gây tê liệt cơ hô hấp cực kỳ nhanh chóng.",
-        "cta": "Bạn có hay ăn đồ hộp không? Hãy để lại bình luận và chia sẻ cảnh báo này ngay!",
-        "full_script": "Cảnh báo khẩn cấp về ngộ độc thực phẩm botulinum nguy hiểm chết người! Bộ Y tế vừa phát hiện nhiều ca ngộ độc nặng do sử dụng đồ hộp kém chất lượng. Độc tố này có thể gây tê liệt cơ hô hấp cực kỳ nhanh chóng. Bạn có hay ăn đồ hộp không? Hãy để lại bình luận và chia sẻ cảnh báo này ngay!"
+def _post(platform: str, words: int) -> dict:
+    return {
+        "hook": "Sự thật về giá vàng bạn chưa biết?",
+        "body": _words(words),
+        "cta": "Bạn nghĩ sao? Hãy để lại bình luận nhé!",
+        "hashtags": ["#giavang"],
+        "platform": platform,
     }
-    
-    report = evaluate_tiktok_script(script_data, source_news)
-    assert 0.0 <= report["overall_score"] <= 100.0
-    assert report["grade"] in ["S", "A", "B", "C"]
-    assert len(report["actionable_checklist"]) > 0
-    assert "hook_score" in report["breakdown"]
-    assert "trend_similarity_score" in report["breakdown"]
-    assert "pacing_score" in report["breakdown"]
-    assert "cta_score" in report["breakdown"]
 
 
-def test_evaluate_empty_script():
-    """Kiểm tra chấm điểm kịch bản rỗng không bao giờ gây lỗi TypeError (str + list)."""
-    report = evaluate_tiktok_script({}, "")
-    assert isinstance(report, dict)
-    assert report["overall_score"] >= 0.0
-    assert isinstance(report["actionable_checklist"], list)
-    assert len(report["actionable_checklist"]) > 0
-    assert report["metrics"]["word_count"] == 0
-    assert report["metrics"]["hook_keywords"] == []
-    assert report["metrics"]["cta_keywords"] == []
+def test_evaluate_structure_and_weights():
+    res = evaluate_post(_post("facebook", 120), SOURCE, platform="facebook")
+    assert set(res["breakdown"]) == {"hook_score", "trend_similarity_score", "pacing_score", "cta_score"}
+    b = res["breakdown"]
+    expected = b["hook_score"] * 0.25 + b["trend_similarity_score"] * 0.35 + b["pacing_score"] * 0.20 + b["cta_score"] * 0.20
+    assert abs(res["overall_score"] - round(expected, 1)) <= 0.11
+    assert res["grade"] in {"S", "A", "B", "C"}
+    assert isinstance(res["actionable_checklist"], list)
+    assert res["metrics"]["platform"] == "facebook"
 
 
-def test_evaluate_partial_script():
-    """Kiểm tra chấm điểm kịch bản chỉ có 1 phần (chỉ hook hoặc chỉ body)."""
-    report_hook_only = evaluate_tiktok_script({"hook": "Sự thật bất ngờ bạn biết chưa?"}, "Tin tức")
-    assert isinstance(report_hook_only["actionable_checklist"], list)
-    assert report_hook_only["breakdown"]["hook_score"] > 0
+def test_evaluate_platform_difference():
+    fb = evaluate_post(_post("facebook", 55), SOURCE, platform="facebook")
+    th = evaluate_post(_post("threads", 55), SOURCE, platform="threads")
+    assert th["breakdown"]["pacing_score"] > fb["breakdown"]["pacing_score"]
 
-    report_cta_only = evaluate_tiktok_script({"cta": "Hãy bình luận ngay nhé!"}, "")
-    assert isinstance(report_cta_only["actionable_checklist"], list)
-    assert report_cta_only["breakdown"]["cta_score"] > 0
+
+def test_evaluate_empty_post_is_low_grade():
+    res = evaluate_post({"platform": "facebook"}, SOURCE)
+    assert res["grade"] == "C"
+    assert res["actionable_checklist"]
 

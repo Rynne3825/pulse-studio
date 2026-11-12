@@ -24,7 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import feedparser
-from src.scraper.rss_scraper import get_high_res_image_url, extract_thumbnail_url
+from src.rss.scraper import get_high_res_image_url, extract_thumbnail_url
 
 
 class MockSafeEntry:
