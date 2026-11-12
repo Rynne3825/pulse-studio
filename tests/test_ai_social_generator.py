@@ -14,7 +14,6 @@ from src.ai.generator import (
     generate_social_post,
     refine_post,
     resolve_model_candidates,
-    safe_social_post_fallback,
     self_healing_json_parser,
 )
 
@@ -60,23 +59,18 @@ class TestGenerateSocialPost:
             res = generate_social_post("T", "S")
         assert res["hook"] == FB_JSON["hook"]
 
-    def test_gateway_failure_uses_fallback(self):
+    def test_gateway_failure_raises_error(self):
         def boom(*a, **k):
             raise RuntimeError("down")
 
         with patch.multiple(generator, detect_router_base_url=lambda: "http://x/v1", execute_chat_completion=boom):
-            res = generate_social_post("Giá vàng tăng", "Giá vàng tăng mạnh", platform="threads")
-        assert "offline_fallback" in res["engine_used"]
-        assert res["full_post"].strip()
+            with pytest.raises(RuntimeError):
+                generate_social_post("T", "S")
 
-    def test_gateway_failure_raises_without_fallback(self):
-        def boom(*a, **k):
-            raise RuntimeError("down")
-
-        with patch.multiple(generator, detect_router_base_url=lambda: "http://x/v1", execute_chat_completion=boom):
-            with patch.dict("os.environ", {"AI_SAFE_FALLBACK": ""}):
-                with pytest.raises(RuntimeError):
-                    generate_social_post("T", "S", safe_fallback=False)
+    def test_empty_response_raises_error(self):
+        with _patched("   "):
+            with pytest.raises(RuntimeError):
+                generate_social_post("T", "S")
 
 
 class TestRefinePost:
@@ -92,6 +86,14 @@ class TestRefinePost:
             res = refine_post("bài cũ", [], platform="threads")
         assert res["platform"] == "threads"
 
+    def test_refine_gateway_failure_raises_error(self):
+        def boom(*a, **k):
+            raise RuntimeError("down")
+
+        with patch.multiple(generator, detect_router_base_url=lambda: "http://x/v1", execute_chat_completion=boom):
+            with pytest.raises(RuntimeError):
+                refine_post("bài cũ", ["Thiếu CTA"], platform="facebook")
+
 
 class TestParserEdgeCases:
     @pytest.mark.parametrize(
@@ -99,16 +101,11 @@ class TestParserEdgeCases:
         ["", "   ", "not json at all", "{", "[]", "null", "{'hook': 'a', 'body': 'b', 'cta': 'c?',}"],
     )
     def test_never_crashes(self, raw):
-        res = self_healing_json_parser(raw, "Tiêu đề", "Tóm tắt", "facebook")
+        res = self_healing_json_parser(raw, "facebook")
         assert isinstance(res, dict)
-        assert res.get("full_post", "").strip()
         assert isinstance(res.get("hashtags", []), list)
 
     def test_trailing_comma(self):
-        res = self_healing_json_parser('{"hook": "H", "body": "B", "cta": "C?", "hashtags": ["#a"],}', "T", "S", "threads")
+        res = self_healing_json_parser('{"hook": "H", "body": "B", "cta": "C?", "hashtags": ["#a"],}', "threads")
         assert res["hook"] == "H"
-
-    def test_fallback_has_fields(self):
-        res = safe_social_post_fallback("Tiêu đề", "Tóm tắt", platform="facebook", style="trend")
-        assert REQUIRED_KEYS <= set(res)
-
+        assert res["full_post"]

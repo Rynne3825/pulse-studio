@@ -126,48 +126,18 @@ def _normalize_tags(raw_tags: Any) -> List[str]:
     return [f"#{t.lstrip('#').strip()}" for t in items if t.strip()]
 
 
-def _apply_safe_social_defaults(
-    result: Dict[str, Any],
-    title: str = "",
-    summary: str = "",
-    platform: str = "facebook",
-    style: str = "trend",
-) -> Dict[str, Any]:
-    plat = (result.get("platform") or platform or "facebook").lower().strip()
-    clean_t = str(title or "").strip()[:80]
-    clean_s = str(summary or "").strip()[:600]
-    sentences = [s.strip() for s in re.split(r"[.\n]+", clean_s) if len(s.strip().split()) >= 3]
-
-    if not result.get("hook"):
-        words = clean_t.split()[:7]
-        result["hook"] = f"Sự thật chấn động: {' '.join(words)}?" if words else "Cảnh báo sự thật chấn động đang gây sốt cộng đồng mạng?"
-
-    if not result.get("body"):
-        if plat == "threads":
-            core = " ".join(sentences[:2]) if sentences else "Vụ việc đang thu hút sự chú ý đặc biệt từ dư luận."
-            result["body"] = f"Về sự việc {clean_t or 'nóng'}: {core} Diễn biến này đặt ra nhiều câu hỏi về trách nhiệm và hệ quả sắp tới."
-        else:
-            p1 = f"Thông tin cập nhật mới nhất về vụ việc {clean_t} đang nhận được sự quan tâm lớn từ cộng đồng mạng."
-            p2 = " ".join(sentences[:2]) if sentences else "Các nguồn tin xác thực cho thấy nhiều tình tiết quan trọng cần được đánh giá toàn diện và thận trọng."
-            p3 = "Giới chuyên gia nhận định đây là bước ngoặt đáng chú ý, tác động trực tiếp đến thị trường trong thời gian tới."
-            result["body"] = f"{p1}\n\n{p2}\n\n{p3}"
-
-    if not result.get("cta"):
-        result["cta"] = (
-            "Bạn nghĩ sao về điều này? Hãy để lại ý kiến thảo luận nhé?"
-            if plat == "threads"
-            else "Bạn nghĩ sao về vấn đề này? Hãy để lại ý kiến và chia sẻ quan điểm dưới phần bình luận nhé?"
-        )
-
-    if not result.get("hashtags"):
-        result["hashtags"] = ["#threads", "#xuhuong"] if plat == "threads" else ["#tintuc", "#xuhuong", "#thoisu", "#bocme"]
-
+def _assemble_post(result: Dict[str, Any], raw_text: str, platform: str) -> Dict[str, Any]:
+    """Hoàn thiện trường full_post từ các phần AI đã trả về (không chèn văn bản mẫu giả)."""
+    plat = _norm_platform(platform)
+    parts = [result[k].strip() for k in ("hook", "body", "cta") if result.get(k, "").strip()]
+    tags_str = " ".join(result.get("hashtags", []))
     if not result.get("full_post"):
-        tags_str = " ".join(result["hashtags"])
-        result["full_post"] = f"{result['hook']}\n\n{result['body']}\n\n{result['cta']}\n\n{tags_str}".strip()
-
+        if parts:
+            result["full_post"] = "\n\n".join(parts + ([tags_str] if tags_str else []))
+        elif raw_text.strip():
+            result["full_post"] = raw_text.strip()
+            result["body"] = raw_text.strip()
     result["platform"] = plat
-    result["style"] = str(result.get("style") or style or "trend")
     return result
 
 
@@ -178,19 +148,14 @@ def _regex_extract_field(text: str, key_pattern: str, next_keys: str) -> str:
     return _clean_str_field(match.group(1)) if match else ""
 
 
-def self_healing_json_parser(
-    raw_text: str,
-    default_title: str = "",
-    default_summary: str = "",
-    platform: str = "facebook",
-) -> Dict[str, Any]:
-    """Bộ phân tích JSON 7 tầng tự phục hồi cho Social Post."""
+def self_healing_json_parser(raw_text: str, platform: str = "facebook") -> Dict[str, Any]:
+    """Bộ phân tích JSON tự phục hồi cho phản hồi từ Gemini (loại bỏ code fence, sửa trailing comma, tách regex)."""
     result: Dict[str, Any] = {"hook": "", "body": "", "cta": "", "hashtags": [], "full_post": "", "platform": platform}
     parsed = raw_text if isinstance(raw_text, dict) else None
     text = "" if parsed is not None else str(raw_text or "").strip()
 
     if parsed is None and not text:
-        return _apply_safe_social_defaults(result, default_title, default_summary, platform=platform)
+        return result
 
     if parsed is None:
         if "```" in text:
@@ -245,20 +210,7 @@ def self_healing_json_parser(
                 if m:
                     result[key] = m.group(1).strip()
 
-    return _apply_safe_social_defaults(result, default_title, default_summary, platform=platform)
-
-
-def safe_social_post_fallback(
-    title: str,
-    summary: str,
-    platform: str = "facebook",
-    style: str = "trend",
-) -> Dict[str, Any]:
-    """Sinh bài đăng dự phòng tất định khi AI gateway ngoại tuyến."""
-    res = _apply_safe_social_defaults({}, title=title, summary=summary, platform=platform, style=style)
-    res["engine_used"] = "gemini (offline_fallback)"
-    res["model_name"] = "deterministic-fallback"
-    return res
+    return _assemble_post(result, text, platform=platform)
 
 
 def execute_chat_completion(
@@ -327,7 +279,6 @@ def generate_social_post(
     summary: str,
     platform: str = "facebook",
     style: str = "trend",
-    safe_fallback: bool = True,
 ) -> Dict[str, Any]:
     """Sinh bài đăng Facebook / Threads qua Gemini 3.8 Flash Router."""
     plat = _norm_platform(platform)
@@ -347,18 +298,11 @@ def generate_social_post(
         },
     ]
 
-    use_fallback = safe_fallback or (os.getenv("AI_SAFE_FALLBACK", "").strip().lower() in ("1", "true", "yes"))
     api_key = os.getenv("ROUTER_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
-
-    try:
-        raw_text, used_model = execute_chat_completion(detect_router_base_url(), api_key, resolve_model_candidates(), messages)
-    except Exception as exc:
-        logger.warning("Gọi Gemini Gateway thất bại: %s", exc)
-        if use_fallback:
-            return safe_social_post_fallback(title, summary, platform=plat, style=style)
-        raise
-
-    parsed = self_healing_json_parser(raw_text, default_title=clean_t, default_summary=clean_s, platform=plat)
+    raw_text, used_model = execute_chat_completion(detect_router_base_url(), api_key, resolve_model_candidates(), messages)
+    parsed = self_healing_json_parser(raw_text, platform=plat)
+    if not parsed.get("full_post", "").strip():
+        raise RuntimeError("Mô hình Gemini trả về nội dung rỗng.")
     return _build_result(parsed, plat, style, used_model)
 
 
@@ -399,15 +343,8 @@ def refine_post(
     ]
 
     api_key = os.getenv("ROUTER_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
-    try:
-        raw_text, used_model = execute_chat_completion(detect_router_base_url(), api_key, resolve_model_candidates(), messages)
-    except Exception as exc:
-        logger.warning("refine_post thất bại (%s), dùng fallback bảo toàn nội dung.", exc)
-        fallback = safe_social_post_fallback(title, summary, platform=plat, style="optimized")
-        if clean_orig:
-            fallback["full_post"] = clean_orig
-            fallback["body"] = clean_orig
-        return fallback
-
-    parsed = self_healing_json_parser(raw_text, default_title=clean_t, default_summary=clean_s, platform=plat)
+    raw_text, used_model = execute_chat_completion(detect_router_base_url(), api_key, resolve_model_candidates(), messages)
+    parsed = self_healing_json_parser(raw_text, platform=plat)
+    if not parsed.get("full_post", "").strip():
+        raise RuntimeError("Mô hình Gemini trả về nội dung rỗng khi tối ưu.")
     return _build_result(parsed, plat, "optimized", used_model)

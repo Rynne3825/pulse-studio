@@ -9,9 +9,9 @@
    - `extract_trending_topics`: TF-IDF n-gram (1, 3), danh sách từ dừng tiếng Việt, tách cụm từ ghép & từ viết tắt, phân tích tỷ lệ sắc thái cộng đồng (tổng 100%).
 2. **M2 – AI Post Generator** (`src/ai/generator.py`)
    - Sử dụng duy nhất mô hình Gemini 3.8 Flash qua Router (`ROUTER_BASE_URL`, mặc định `http://127.0.0.1:20128/v1`).
-   - `generate_social_post(title, summary, platform, style, safe_fallback)`: Facebook (~90–220 từ) và Threads (~35–85 từ).
+   - `generate_social_post(title, summary, platform, style)`: Facebook (~90–220 từ) và Threads (~35–85 từ).
    - `refine_post(original_post, feedback_checklist, platform, title, summary)`: tối ưu dựa trên lỗi từ bộ đánh giá.
-   - `self_healing_json_parser` 7 tầng kết hợp fallback an toàn khi gateway ngắt kết nối.
+   - `self_healing_json_parser` tự sửa lỗi định dạng JSON/Markdown từ LLM (báo lỗi trực tiếp nếu mất kết nối Gateway).
 3. **M3 – Viral Evaluator** (`src/eval/scorer.py`)
    - `PostViralEvaluator` / `evaluate_post(post_data, source_text, platform)`: chấm điểm 0–100, xếp hạng S/A/B/C từ 4 trụ cột: Hook (25%) · Độ bám tin Cosine (35%) · Cấu trúc (20%) · CTA (20%).
 4. **M4 – UI Studio (`app/`)**

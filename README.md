@@ -36,6 +36,8 @@ copy .env.example .env      # cấu hình ROUTER_API_KEY
 run_app.bat                 # hoặc: .venv\Scripts\python.exe -m streamlit run app/app.py
 ```
 
+Lưu ý: Cần khởi động 9Router (`http://127.0.0.1:20128/v1`) trước khi gọi AI sinh bài hoặc tối ưu v2.
+
 ## Chạy kiểm thử
 
 ```powershell

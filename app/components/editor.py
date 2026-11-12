@@ -527,7 +527,6 @@ def render_post_editor_panel(selected_article: Optional[Dict[str, Any]]) -> Tupl
                             summary=summary,
                             platform=platform,
                             style=style,
-                            safe_fallback=True,
                         )
                         v1_eval = evaluate_post(post_res, source_full, platform=platform)
 
